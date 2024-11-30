@@ -1,0 +1,159 @@
+import os
+import cv2
+import numpy as np
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import ImageDataGenerator
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Flatten, Dropout
+from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.callbacks import ReduceLROnPlateau
+from tensorflow.keras.regularizers import l2
+
+# DNNベースの顔検出を行う関数
+def detect_face_dnn(image_path, target_size=(224, 224), confidence_threshold=0.5):
+    model_file = "cascades/res10_300x300_ssd_iter_140000.caffemodel"
+    config_file = "cascades/deploy.prototxt"
+    
+    net = cv2.dnn.readNetFromCaffe(config_file, model_file)
+    img = cv2.imread(image_path)
+    
+    if img is None:
+        print(f"Error: Failed to load image at {image_path}")
+        return None
+    
+    h, w = img.shape[:2]
+    blob = cv2.dnn.blobFromImage(cv2.resize(img, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
+    net.setInput(blob)
+    detections = net.forward()
+    
+    best_face = None
+    for i in range(detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        if confidence > confidence_threshold:
+            box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+            (x1, y1, x2, y2) = box.astype("int")
+            face = img[y1:y2, x1:x2]
+            if best_face is None or face.shape[0] * face.shape[1] > best_face.shape[0] * best_face.shape[1]:
+                best_face = face
+    
+    if best_face is None:
+        print(f"No face detected in {image_path}. Skipping this image.")
+        return None
+    else:
+        print(f"Face detected in {image_path}.")
+    
+    return cv2.resize(best_face, target_size)
+
+# 学習用画像の保存（顔が検出された画像のみ）
+def preprocess_images(input_dir, output_dir):
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    for class_dir in os.listdir(input_dir):
+        class_path = os.path.join(input_dir, class_dir)
+        output_class_path = os.path.join(output_dir, class_dir)
+        
+        if not os.path.exists(output_class_path):
+            os.makedirs(output_class_path)
+        
+        for img_name in os.listdir(class_path):
+            img_path = os.path.join(class_path, img_name)
+            face_img = detect_face_dnn(img_path)
+            
+            if face_img is not None:
+                output_img_path = os.path.join(output_class_path, img_name)
+                cv2.imwrite(output_img_path, face_img)
+                if os.path.exists(output_img_path):
+                    print(f"Image saved successfully: {output_img_path}")
+                else:
+                    print(f"Error: Image could not be saved: {output_img_path}")
+
+# モデルをiCloudに保存する関数
+def save_model_to_icloud(model, filename, icloud_path):
+    try:
+        model_path = os.path.join(icloud_path, filename)
+        model.save(model_path)
+        if os.path.exists(model_path):
+            print(f"Model saved successfully to iCloud: {model_path}")
+        else:
+            print(f"Error: Model could not be saved to iCloud.")
+    except Exception as e:
+        print(f"Error saving model to iCloud: {str(e)}")
+        raise
+
+# データ前処理
+preprocess_images('dataset', 'processed_dataset')
+
+# EfficientNetB0をベースモデルとしてロード
+base_model = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+for layer in base_model.layers[:-12]:
+    layer.trainable = False
+
+# 全結合層の簡略化
+model = Sequential([
+    base_model,
+    Flatten(),
+    Dense(128, activation='relu', kernel_regularizer=l2(0.01)),
+    Dropout(0.5),
+    Dense(8, activation='softmax')
+])
+
+# クラス名の設定
+custom_classes = ['Daiki_Tode', 'Haruna_Oguro', 'Himeka_Kugai', 'Honoka_Nishikawa', 
+                  'Nonoka_Sato', 'Shohei_Otsuka', 'Taiki_Kimura', 'Yuna_Katayose']
+
+# データ拡張の増強
+datagen = ImageDataGenerator(
+    rotation_range=40,
+    width_shift_range=0.3,
+    height_shift_range=0.3,
+    shear_range=0.3,
+    zoom_range=0.3,
+    horizontal_flip=True,
+    fill_mode='nearest',
+    validation_split=0.2
+)
+
+# データジェネレータ
+train_generator = datagen.flow_from_directory(
+    'processed_dataset',
+    target_size=(224, 224),
+    batch_size=32,
+    class_mode='categorical',
+    classes=custom_classes,
+    subset='training'
+)
+
+validation_generator = datagen.flow_from_directory(
+    'processed_dataset',
+    target_size=(224, 224),
+    batch_size=32,
+    class_mode='categorical',
+    classes=custom_classes,
+    subset='validation'
+)
+
+# ReduceLROnPlateauと学習率の調整
+lr_reduction = ReduceLROnPlateau(monitor='val_loss', patience=8, factor=0.5, min_lr=0.00001)
+optimizer = Adam(learning_rate=0.0003)
+
+# モデルのコンパイル
+model.compile(optimizer=optimizer, loss='categorical_crossentropy', metrics=['accuracy'])
+
+# モデルの学習
+history = model.fit(
+    train_generator,
+    epochs=60,
+    steps_per_epoch=train_generator.samples // train_generator.batch_size,
+    validation_data=validation_generator,
+    validation_steps=validation_generator.samples // validation_generator.batch_size,
+    callbacks=[lr_reduction]
+)
+
+# モデルの保存
+icloud_model_path = r'C:\Users\金子礼人\iCloudDrive\project\model'
+if not os.path.exists(icloud_model_path):
+    os.makedirs(icloud_model_path)
+filename = 'efficientnet_finetuned_face_recognition_model_60_epochs.keras'
+save_model_to_icloud(model, filename, icloud_model_path)
