@@ -69,18 +69,22 @@ def preprocess_images(input_dir, output_dir):
                 else:
                     print(f"Error: Image could not be saved: {output_img_path}")
 
-# モデルをiCloudに保存する関数
-def save_model_to_icloud(model, filename, icloud_path):
-    try:
-        model_path = os.path.join(icloud_path, filename)
-        model.save(model_path)
-        if os.path.exists(model_path):
-            print(f"Model saved successfully to iCloud: {model_path}")
-        else:
-            print(f"Error: Model could not be saved to iCloud.")
-    except Exception as e:
-        print(f"Error saving model to iCloud: {str(e)}")
-        raise
+# モデルを保存する関数
+def save_model(model, save_dir, filename):
+    """
+    モデルを指定されたディレクトリに保存します。
+    必要に応じてディレクトリを作成します。
+    """
+    # 保存先ディレクトリを確認し、必要なら作成
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+    
+    # 保存パスの構築
+    model_path = os.path.join(save_dir, filename)
+    
+    # モデルを保存
+    model.save(model_path)
+    print(f"Model saved successfully: {model_path}")
 
 # データ前処理
 preprocess_images(r'D:\project\dataset', r'D:\project\processed_dataset')
@@ -152,8 +156,4 @@ history = model.fit(
 )
 
 # モデルの保存
-icloud_model_path = r'D:\project\model'
-if not os.path.exists(icloud_model_path):
-    os.makedirs(icloud_model_path)
-filename = 'efficientnet_finetuned_face_recognition_model_60_epochs.keras'
-save_model_to_icloud(model, filename, icloud_model_path)
+save_model(model, r'D:\project\model', 'efficientnet_finetuned_face_recognition_model_60_epochs.keras')
