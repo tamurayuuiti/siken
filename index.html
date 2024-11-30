@@ -10,6 +10,11 @@ from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.callbacks import ReduceLROnPlateau
 from tensorflow.keras.regularizers import l2
 
+# ANSIエスケープコードで色を指定
+GREEN = '\033[92m'
+RED = '\033[91m'
+RESET = '\033[0m'
+
 # DNNベースの顔検出を行う関数
 def detect_face_dnn(image_path, target_size=(224, 224), confidence_threshold=0.5):
     model_file = r'D:\project\cascades\res10_300x300_ssd_iter_140000.caffemodel'
@@ -38,10 +43,10 @@ def detect_face_dnn(image_path, target_size=(224, 224), confidence_threshold=0.5
                 best_face = face
     
     if best_face is None:
-        print(f"No face detected in {image_path}. Skipping this image.")
+        print(RED + f"No face detected in {image_path}. Skipping this image." + RESET)
         return None
     else:
-        print(f"Face detected in {image_path}.")
+        print(GREEN + f"Face detected in {image_path}." + RESET)
     
     return cv2.resize(best_face, target_size)
 
@@ -69,6 +74,30 @@ def preprocess_images(input_dir, output_dir):
                 else:
                     print(f"Error: Image could not be saved: {output_img_path}")
 
+# データセットの検査関数
+def check_dataset(dataset_dir):
+    print(GREEN + "Checking dataset..." + RESET)
+    class_dirs = [d for d in os.listdir(dataset_dir) if os.path.isdir(os.path.join(dataset_dir, d))]
+    
+    # クラスごとの画像数を確認
+    class_image_counts = {}
+    for class_dir in class_dirs:
+        class_path = os.path.join(dataset_dir, class_dir)
+        images = [f for f in os.listdir(class_path) if f.lower().endswith(('png', 'jpg', 'jpeg'))]
+        class_image_counts[class_dir] = len(images)
+        
+        # 画像が少ない場合の警告
+        if len(images) < 10:
+            print(RED + f"Warning: Class '{class_dir}' has less than 10 images ({len(images)})." + RESET)
+    
+    # クラス間のバランス確認
+    min_count = min(class_image_counts.values())
+    max_count = max(class_image_counts.values())
+    if max_count / min_count > 2:
+        print(RED + "Warning: Dataset is imbalanced. Some classes have significantly more images than others." + RESET)
+    
+    print(GREEN + "Dataset check complete." + RESET)
+
 # モデルを保存する関数
 def save_model(model, save_dir, filename):
     """
@@ -86,8 +115,12 @@ def save_model(model, save_dir, filename):
     model.save(model_path)
     print(f"Model saved successfully: {model_path}")
 
+# データセットチェック
+dataset_dir = r'D:\project\dataset'
+check_dataset(dataset_dir)
+
 # データ前処理
-preprocess_images(r'D:\project\dataset', r'D:\project\processed_dataset')
+preprocess_images(dataset_dir, r'D:\project\processed_dataset')
 
 # EfficientNetB0をベースモデルとしてロード
 base_model = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
@@ -103,9 +136,9 @@ model = Sequential([
     Dense(8, activation='softmax')
 ])
 
-# クラス名の設定
-custom_classes = ['Daiki_Tode', 'Haruna_Oguro', 'Himeka_Kugai', 'Honoka_Nishikawa', 
-                  'Nonoka_Sato', 'Shohei_Otsuka', 'Taiki_Kimura', 'Yuna_Katayose']
+# クラス名の設定をフォルダ名から取得
+dataset_dir = r'D:\project\processed_dataset'
+custom_classes = sorted([d for d in os.listdir(dataset_dir) if os.path.isdir(os.path.join(dataset_dir, d))])
 
 # データ拡張の増強
 datagen = ImageDataGenerator(
@@ -121,7 +154,7 @@ datagen = ImageDataGenerator(
 
 # データジェネレータ
 train_generator = datagen.flow_from_directory(
-    r'D:\project\processed_dataset',
+    dataset_dir,
     target_size=(224, 224),
     batch_size=32,
     class_mode='categorical',
@@ -130,7 +163,7 @@ train_generator = datagen.flow_from_directory(
 )
 
 validation_generator = datagen.flow_from_directory(
-    r'D:\project\processed_dataset',
+    dataset_dir,
     target_size=(224, 224),
     batch_size=32,
     class_mode='categorical',
