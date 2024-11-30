@@ -12,8 +12,8 @@ from tensorflow.keras.regularizers import l2
 
 # DNNベースの顔検出を行う関数
 def detect_face_dnn(image_path, target_size=(224, 224), confidence_threshold=0.5):
-    model_file = "cascades/res10_300x300_ssd_iter_140000.caffemodel"
-    config_file = "cascades/deploy.prototxt"
+    model_file = r'D:\project\cascades\res10_300x300_ssd_iter_140000.caffemodel'
+    config_file = r'D:\project\cascades\deploy.prototxt'
     
     net = cv2.dnn.readNetFromCaffe(config_file, model_file)
     img = cv2.imread(image_path)
@@ -83,7 +83,7 @@ def save_model_to_icloud(model, filename, icloud_path):
         raise
 
 # データ前処理
-preprocess_images('dataset', 'processed_dataset')
+preprocess_images(r'D:\project\dataset', r'D:\project\processed_dataset')
 
 # EfficientNetB0をベースモデルとしてロード
 base_model = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
@@ -117,7 +117,7 @@ datagen = ImageDataGenerator(
 
 # データジェネレータ
 train_generator = datagen.flow_from_directory(
-    'processed_dataset',
+    r'D:\project\processed_dataset',
     target_size=(224, 224),
     batch_size=32,
     class_mode='categorical',
@@ -126,7 +126,7 @@ train_generator = datagen.flow_from_directory(
 )
 
 validation_generator = datagen.flow_from_directory(
-    'processed_dataset',
+    r'D:\project\processed_dataset',
     target_size=(224, 224),
     batch_size=32,
     class_mode='categorical',
@@ -152,7 +152,7 @@ history = model.fit(
 )
 
 # モデルの保存
-icloud_model_path = r'C:\Users\金子礼人\iCloudDrive\project\model'
+icloud_model_path = r'D:\project\model'
 if not os.path.exists(icloud_model_path):
     os.makedirs(icloud_model_path)
 filename = 'efficientnet_finetuned_face_recognition_model_60_epochs.keras'
