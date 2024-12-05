@@ -29,17 +29,18 @@ AUGMENTED_DIR = os.path.join(BASE_DIR, "project", "augmented_dataset")
 MODEL_DIR = os.path.join(BASE_DIR, "project", "model")
 RANDOM_FACES_DIR = os.path.join(BASE_DIR, "project", "random_faces")
 
-# ランダム顔画像データセットの準備（背景ノイズ除去）
-def prepare_random_faces_with_bbox(target_count):
+# ランダム顔画像データセットの準備（unknownクラス作成）
+def prepare_unknown_class_with_bbox(target_count):
     """
-    必要なランダム顔画像を選択し、list_bbox_celeba.txtを用いて顔領域のみを切り抜いて保存。
+    ランダム画像を使用してunknownクラスを作成する。
     """
     # CelebAの画像フォルダとバウンディングボックスファイル
     celebA_dir = os.path.join(BASE_DIR, "celebA", "img_align_celeba")
     bbox_file = os.path.join(BASE_DIR, "celebA", "list_bbox_celeba.txt")
+    unknown_class_dir = os.path.join(AUGMENTED_DIR, "unknown")
     
-    if not os.path.exists(RANDOM_FACES_DIR):
-        os.makedirs(RANDOM_FACES_DIR)
+    if not os.path.exists(unknown_class_dir):
+        os.makedirs(unknown_class_dir)
     
     # バウンディングボックス情報を読み込む
     bbox_dict = {}
@@ -57,7 +58,7 @@ def prepare_random_faces_with_bbox(target_count):
     
     for img_name in selected_images:
         src_path = os.path.join(celebA_dir, img_name)
-        dest_path = os.path.join(RANDOM_FACES_DIR, img_name)
+        dest_path = os.path.join(unknown_class_dir, img_name)
         if img_name in bbox_dict:
             x, y, w, h = bbox_dict[img_name]
             img = cv2.imread(src_path)
@@ -66,7 +67,7 @@ def prepare_random_faces_with_bbox(target_count):
                 face = img[y:y+h, x:x+w]
                 face_resized = cv2.resize(face, (224, 224))  # サイズを統一
                 cv2.imwrite(dest_path, face_resized)
-    print(f"Random faces prepared with bounding boxes: {target_count} images.")
+    print(f"Unknown class prepared with {target_count} random images.")
 
 # 顔検出用関数
 def detect_face_dnn(image_path, target_size=(224, 224), confidence_threshold=0.5):
@@ -184,6 +185,9 @@ preprocess_images(DATASET_DIR, PROCESSED_DIR, NO_FACE_DIR, UNSUPPORTED_FORMAT_DI
 
 # データ拡張（目標: 各クラス200枚）
 augment_and_save_images(PROCESSED_DIR, AUGMENTED_DIR, target_count=200)
+
+# unknownクラスの作成（200枚に合わせる）
+prepare_unknown_class_with_bbox(200)
 
 # EfficientNetB0をベースモデルとしてロード
 base_model = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
