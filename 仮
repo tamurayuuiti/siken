@@ -6,7 +6,7 @@ import sys
 def organize_and_resize_with_blurred_background(image_dir, identity_file, output_dir, target_size=(112, 112)):
     """
     顔検出を利用し、背景をぼかして画像をリサイズして保存する。
-    処理の進捗を表示し、顔が検出できなかった画像をカウントします。
+    顔が検出できなかった画像を別フォルダにオリジナルのまま保存する。
     :param image_dir: 元の画像フォルダ
     :param identity_file: ID情報が記載されたファイル
     :param output_dir: クラスごとに整理してリサイズした画像の保存先
@@ -20,6 +20,8 @@ def organize_and_resize_with_blurred_background(image_dir, identity_file, output
 
     # 出力ディレクトリを作成
     os.makedirs(output_dir, exist_ok=True)
+    no_face_dir = os.path.join(output_dir, "no_face")  # 顔検出失敗時の保存先
+    os.makedirs(no_face_dir, exist_ok=True)
 
     # ID情報ファイルを読み込み
     with open(identity_file, 'r') as f:
@@ -70,14 +72,18 @@ def organize_and_resize_with_blurred_background(image_dir, identity_file, output
         # 背景をぼかし、顔を中央に配置
         if face_box is not None:
             (x1, y1, x2, y2) = face_box
-            blurred_img = blur_background(img, face_box, target_size)
+            processed_img = blur_background(img, face_box, target_size)
         else:
             no_face_count += 1
-            blurred_img = cv2.resize(img, target_size)
+            # 元画像をno_faceフォルダに保存
+            no_face_path = os.path.join(no_face_dir, image_name)
+            cv2.imwrite(no_face_path, img)
+            # 現状のリサイズ処理
+            processed_img = cv2.resize(img, target_size)
 
         # 保存先のパス
         output_image_path = os.path.join(person_folder, image_name)
-        cv2.imwrite(output_image_path, blurred_img)
+        cv2.imwrite(output_image_path, processed_img)
 
         # 進捗表示（上書き）
         progress = f"Processing: {idx}/{total_images} ({(idx / total_images) * 100:.2f}%) - No Face: {no_face_count}"
