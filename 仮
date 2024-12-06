@@ -23,9 +23,9 @@ def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir,
 
     # 各画像をクラスごとに整理
     for line in lines:
-        # ファイル名を`.png`形式に変更
-        image_name, person_id = line.strip().split()  # 例: "000001.jpg 1"
-        image_name = image_name.replace('.jpg', '.png')  # .jpgを.pngに変更
+        # ファイル名を取得し、`.jpg`形式でバウンディングボックスを参照
+        image_name, person_id = line.strip().split()
+        image_name_jpg = image_name.replace('.png', '.jpg')  # `.png`を`.jpg`に変換
 
         # 出力先のクラスフォルダを作成
         person_folder = os.path.join(output_dir, f'class_{person_id}')
@@ -38,7 +38,7 @@ def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir,
             continue
 
         # バウンディングボックス情報を取得
-        bbox_row = bbox_data[bbox_data['image_id'] == image_name]
+        bbox_row = bbox_data[bbox_data['image_id'] == image_name_jpg]  # `.jpg`形式で検索
         if bbox_row.empty:
             print(f"Warning: No bounding box found for {image_name}")
             continue
