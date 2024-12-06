@@ -1,5 +1,6 @@
 import os
 import cv2
+import numpy as np
 
 def organize_and_resize_with_face_detection(image_dir, identity_file, output_dir, target_size=(112, 112)):
     """
@@ -10,8 +11,9 @@ def organize_and_resize_with_face_detection(image_dir, identity_file, output_dir
     :param target_size: リサイズ後の画像サイズ (width, height)
     """
     # OpenCVのDNNモジュールを使用して顔検出モデルを読み込む
-    model_file = "deploy.prototxt"  # Caffeモデルの構成ファイル
-    weights_file = "res10_300x300_ssd_iter_140000.caffemodel"  # 学習済みの重みファイル
+    cascades_dir = os.path.join(os.path.dirname(__file__), "data", "cascades")
+    model_file = os.path.join(cascades_dir, "deploy.prototxt")  # Caffeモデルの構成ファイル
+    weights_file = os.path.join(cascades_dir, "res10_300x300_ssd_iter_140000.caffemodel")  # 学習済みの重みファイル
     net = cv2.dnn.readNetFromCaffe(model_file, weights_file)
 
     # 出力ディレクトリを作成
