@@ -3,15 +3,14 @@ import cv2
 import numpy as np
 import sys
 
-def organize_and_resize_with_face_detection(image_dir, identity_file, output_dir, target_size=(112, 112), use_transparent_bg=False):
+def organize_and_resize_with_blurred_background(image_dir, identity_file, output_dir, target_size=(112, 112)):
     """
-    顔検出を利用してデータセットをクラスごとに整理し、顔領域のみリサイズして保存する。
-    処理の進捗を分数およびパーセンテージで表示し、顔が検出できなかった画像をカウントします。
+    顔検出を利用し、背景をぼかして画像をリサイズして保存する。
+    処理の進捗を表示し、顔が検出できなかった画像をカウントします。
     :param image_dir: 元の画像フォルダ
     :param identity_file: ID情報が記載されたファイル
     :param output_dir: クラスごとに整理してリサイズした画像の保存先
     :param target_size: リサイズ後の画像サイズ (width, height)
-    :param use_transparent_bg: Trueの場合、余白を透過にします
     """
     # OpenCVのDNNモジュールを使用して顔検出モデルを読み込む
     cascades_dir = os.path.join(os.path.dirname(__file__), "data", "cascades")
@@ -68,20 +67,17 @@ def organize_and_resize_with_face_detection(image_dir, identity_file, output_dir
                     max_area = area
                     face_box = (x1, y1, x2, y2)
 
-        # 顔が検出された場合はクロップ、検出されない場合は元画像を使用
+        # 背景をぼかし、顔を中央に配置
         if face_box is not None:
             (x1, y1, x2, y2) = face_box
-            cropped_img = img[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]  # 顔領域をクロップ
+            blurred_img = blur_background(img, face_box, target_size)
         else:
             no_face_count += 1
-            cropped_img = img
-
-        # リサイズ（アスペクト比を維持、余白を設定）
-        resized_img = resize_with_aspect_ratio(cropped_img, target_size, use_transparent_bg)
+            blurred_img = cv2.resize(img, target_size)
 
         # 保存先のパス
         output_image_path = os.path.join(person_folder, image_name)
-        cv2.imwrite(output_image_path, resized_img)
+        cv2.imwrite(output_image_path, blurred_img)
 
         # 進捗表示（上書き）
         progress = f"Processing: {idx}/{total_images} ({(idx / total_images) * 100:.2f}%) - No Face: {no_face_count}"
@@ -92,39 +88,25 @@ def organize_and_resize_with_face_detection(image_dir, identity_file, output_dir
     print(f"Total images processed: {total_images}, No face detected: {no_face_count}")
 
 
-def resize_with_aspect_ratio(image, target_size, use_transparent_bg=False):
+def blur_background(image, face_box, target_size):
     """
-    アスペクト比を維持して画像をリサイズし、余白を追加。
+    背景をぼかして顔領域を中央に配置する。
     :param image: 入力画像
+    :param face_box: 顔のバウンディングボックス (x1, y1, x2, y2)
     :param target_size: リサイズ後のサイズ (width, height)
-    :param use_transparent_bg: Trueの場合、余白を透過にします
-    :return: リサイズされた画像
+    :return: 背景をぼかしてリサイズされた画像
     """
-    target_width, target_height = target_size
-    h, w = image.shape[:2]
+    x1, y1, x2, y2 = face_box
+    face = image[max(0, y1):min(y2, image.shape[0]), max(0, x1):min(x2, image.shape[1])]
 
-    # アスペクト比を計算
-    aspect_ratio = w / h
-    if w > h:
-        new_width = target_width
-        new_height = int(new_width / aspect_ratio)
-    else:
-        new_height = target_height
-        new_width = int(new_height * aspect_ratio)
+    # 背景をぼかす
+    blurred_image = cv2.GaussianBlur(image, (51, 51), 0)
 
-    resized_img = cv2.resize(image, (new_width, new_height))
+    # ぼかし画像に顔を合成
+    blurred_image[max(0, y1):min(y2, image.shape[0]), max(0, x1):min(x2, image.shape[1])] = face
 
-    # ターゲットサイズのキャンバスを作成して中央に配置
-    if use_transparent_bg:
-        canvas = np.zeros((target_height, target_width, 4), dtype="uint8")  # 透過用アルファチャネル付き
-    else:
-        canvas = np.zeros((target_height, target_width, 3), dtype="uint8")  # 黒背景
-
-    x_offset = (target_width - new_width) // 2
-    y_offset = (target_height - new_height) // 2
-    canvas[y_offset:y_offset + new_height, x_offset:x_offset + new_width] = resized_img
-
-    return canvas
+    # リサイズ
+    return cv2.resize(blurred_image, target_size)
 
 
 # --- 実行 ---
@@ -138,10 +120,4 @@ if __name__ == "__main__":
     output_dir = os.path.join(base_dir, "processed_data")  # 出力フォルダ
 
     # 処理を実行
-    organize_and_resize_with_face_detection(
-        image_dir,
-        identity_file,
-        output_dir,
-        target_size=(112, 112),
-        use_transparent_bg=True  # Trueにすると余白が透過になります
-    )
+    organize_and_resize_with_blurred_background(image_dir, identity_file, output_dir, target_size=(112, 112))
