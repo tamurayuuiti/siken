@@ -23,24 +23,30 @@ def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir,
 
     # 各画像をクラスごとに整理
     for line in lines:
-        # ファイル名を取得し、`.jpg`形式でバウンディングボックスを参照
+        # ファイル名の番号部分のみ取得（拡張子を無視）
         image_name, person_id = line.strip().split()
-        image_name_jpg = image_name.replace('.png', '.jpg')  # `.png`を`.jpg`に変換
+        image_basename = os.path.splitext(image_name)[0]  # 拡張子を削除した名前（例: "000001"）
 
         # 出力先のクラスフォルダを作成
         person_folder = os.path.join(output_dir, f'class_{person_id}')
         os.makedirs(person_folder, exist_ok=True)
 
-        # 元画像のパス
-        input_image_path = os.path.join(image_dir, image_name)
-        if not os.path.exists(input_image_path):
-            print(f"Warning: Image not found: {input_image_path}")
+        # 元画像を検索（番号に一致するファイルを探す）
+        input_image_path = None
+        for ext in ['.jpg', '.png', '.jpeg']:  # 対応可能な拡張子リスト
+            candidate_path = os.path.join(image_dir, f"{image_basename}{ext}")
+            if os.path.exists(candidate_path):
+                input_image_path = candidate_path
+                break
+
+        if input_image_path is None:
+            print(f"Warning: No image file found for {image_basename}")
             continue
 
         # バウンディングボックス情報を取得
-        bbox_row = bbox_data[bbox_data['image_id'] == image_name_jpg]  # `.jpg`形式で検索
+        bbox_row = bbox_data[bbox_data['image_id'] == f"{image_basename}.jpg"]  # バウンディングボックス情報は常に`.jpg`
         if bbox_row.empty:
-            print(f"Warning: No bounding box found for {image_name}")
+            print(f"Warning: No bounding box found for {image_basename}")
             continue
         x, y, w, h = bbox_row.iloc[0][['x_1', 'y_1', 'width', 'height']]
 
@@ -53,10 +59,10 @@ def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir,
             resized_img = cv2.resize(cropped_img, target_size)
 
             # リサイズ画像の保存
-            output_image_path = os.path.join(person_folder, image_name)
+            output_image_path = os.path.join(person_folder, f"{image_basename}.png")
             cv2.imwrite(output_image_path, resized_img)
         except Exception as e:
-            print(f"Error processing image {image_name}: {e}")
+            print(f"Error processing image {image_basename}: {e}")
 
     print(f"Organized and resized dataset saved to: {output_dir}")
 
