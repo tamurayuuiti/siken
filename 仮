@@ -1,16 +1,19 @@
 import os
 import cv2
-import pandas as pd
 
-def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir, target_size=(112, 112)):
+def organize_and_resize_with_face_detection(image_dir, identity_file, output_dir, target_size=(112, 112)):
     """
-    データセットをクラスごとに整理し、画像をリサイズして保存する。
-    :param image_dir: 元の画像フォルダ（CelebAの全画像が含まれているフォルダ）
-    :param identity_file: PNG形式に変換されたID情報ファイル（例: identity_CelebA_png.txt）
-    :param bbox_file: PNG形式に変換されたバウンディングボックス情報ファイル（例: list_bbox_celeba_png.txt）
+    顔検出を利用してデータセットをクラスごとに整理し、顔領域のみリサイズして保存する。
+    :param image_dir: 元の画像フォルダ
+    :param identity_file: ID情報が記載されたファイル
     :param output_dir: クラスごとに整理してリサイズした画像の保存先
     :param target_size: リサイズ後の画像サイズ (width, height)
     """
+    # OpenCVのDNNモジュールを使用して顔検出モデルを読み込む
+    model_file = "deploy.prototxt"  # Caffeモデルの構成ファイル
+    weights_file = "res10_300x300_ssd_iter_140000.caffemodel"  # 学習済みの重みファイル
+    net = cv2.dnn.readNetFromCaffe(model_file, weights_file)
+
     # 出力ディレクトリを作成
     os.makedirs(output_dir, exist_ok=True)
 
@@ -18,17 +21,9 @@ def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir,
     with open(identity_file, 'r') as f:
         lines = f.readlines()
 
-    # バウンディングボックス情報を読み込み
-    bbox_data = pd.read_csv(bbox_file, delim_whitespace=True, skiprows=1)
-
-    # 各画像をクラスごとに整理
     for line in lines:
         # ファイル名とクラスIDを取得
-        image_name, person_id = line.strip().split()  # 例: "000001.png 1"
-
-        # 出力先のクラスフォルダを作成
-        person_folder = os.path.join(output_dir, f'class_{person_id}')
-        os.makedirs(person_folder, exist_ok=True)
+        image_name, person_id = line.strip().split()
 
         # 元画像のパス
         input_image_path = os.path.join(image_dir, image_name)
@@ -36,40 +31,92 @@ def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir,
             print(f"Warning: Image not found: {input_image_path}")
             continue
 
-        # バウンディングボックス情報を取得
-        bbox_row = bbox_data[bbox_data['image_id'] == image_name]  # PNG形式で一致
-        if bbox_row.empty:
-            print(f"Warning: No bounding box found for {image_name}")
+        # 出力先のクラスフォルダを作成
+        person_folder = os.path.join(output_dir, f'class_{person_id}')
+        os.makedirs(person_folder, exist_ok=True)
+
+        # 元画像を読み込み
+        img = cv2.imread(input_image_path)
+        if img is None:
+            print(f"Warning: Failed to read image: {input_image_path}")
             continue
-        x, y, w, h = bbox_row.iloc[0][['x_1', 'y_1', 'width', 'height']]
 
-        # 画像の読み込みと顔領域のクロップ＆リサイズ
-        try:
-            img = cv2.imread(input_image_path)
-            if img is None:
-                raise ValueError(f"Failed to read image: {input_image_path}")
-            cropped_img = img[int(y):int(y + h), int(x):int(x + w)]  # 顔領域のクロップ
-            resized_img = cv2.resize(cropped_img, target_size)
+        # 顔検出
+        (h, w) = img.shape[:2]
+        blob = cv2.dnn.blobFromImage(cv2.resize(img, (300, 300)), 1.0, (300, 300), (104.0, 177.0, 123.0))
+        net.setInput(blob)
+        detections = net.forward()
 
-            # リサイズ画像の保存
-            output_image_path = os.path.join(person_folder, image_name)
-            cv2.imwrite(output_image_path, resized_img)
-        except Exception as e:
-            print(f"Error processing image {image_name}: {e}")
+        # 最大の顔領域を探す
+        max_area = 0
+        face_box = None
+        for i in range(detections.shape[2]):
+            confidence = detections[0, 0, i, 2]
+            if confidence > 0.5:  # 信頼度が50%以上の顔を使用
+                box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
+                (x1, y1, x2, y2) = box.astype("int")
+                area = (x2 - x1) * (y2 - y1)
+                if area > max_area:
+                    max_area = area
+                    face_box = (x1, y1, x2, y2)
+
+        # 顔が検出された場合はクロップ、検出されない場合は元画像を使用
+        if face_box is not None:
+            (x1, y1, x2, y2) = face_box
+            cropped_img = img[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]  # 顔領域をクロップ
+        else:
+            print(f"Warning: No face detected in {image_name}, using full image.")
+            cropped_img = img
+
+        # リサイズ（アスペクト比を維持）
+        resized_img = resize_with_aspect_ratio(cropped_img, target_size)
+
+        # 保存先のパス
+        output_image_path = os.path.join(person_folder, image_name)
+        cv2.imwrite(output_image_path, resized_img)
 
     print(f"Organized and resized dataset saved to: {output_dir}")
 
 
+def resize_with_aspect_ratio(image, target_size):
+    """
+    アスペクト比を維持して画像をリサイズする。
+    :param image: 入力画像
+    :param target_size: リサイズ後のサイズ (width, height)
+    :return: リサイズされた画像
+    """
+    target_width, target_height = target_size
+    h, w = image.shape[:2]
+
+    # アスペクト比を計算
+    aspect_ratio = w / h
+    if w > h:
+        new_width = target_width
+        new_height = int(new_width / aspect_ratio)
+    else:
+        new_height = target_height
+        new_width = int(new_height * aspect_ratio)
+
+    resized_img = cv2.resize(image, (new_width, new_height))
+
+    # ターゲットサイズのキャンバスを作成して中央に配置
+    canvas = np.zeros((target_height, target_width, 3), dtype="uint8")
+    x_offset = (target_width - new_width) // 2
+    y_offset = (target_height - new_height) // 2
+    canvas[y_offset:y_offset + new_height, x_offset:x_offset + new_width] = resized_img
+
+    return canvas
+
+
 # --- 実行 ---
 if __name__ == "__main__":
-    # 現在のスクリプトがあるディレクトリを基準とする
+    # 現在のスクリプトディレクトリを基準とする
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
     # パス指定（相対パス）
     image_dir = os.path.join(base_dir, "data/img_align_celeba")  # 元画像フォルダ
-    identity_file = os.path.join(base_dir, "data/identity_CelebA_png.txt")  # PNG対応のID情報ファイル
-    bbox_file = os.path.join(base_dir, "data/list_bbox_celeba_png.txt")  # PNG対応のバウンディングボックス情報ファイル
+    identity_file = os.path.join(base_dir, "data/identity_CelebA_png.txt")  # PNG形式に変換されたID情報ファイル
     output_dir = os.path.join(base_dir, "processed_data")  # 出力フォルダ
 
     # 処理を実行
-    organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir, target_size=(112, 112))
+    organize_and_resize_with_face_detection(image_dir, identity_file, output_dir, target_size=(112, 112))
