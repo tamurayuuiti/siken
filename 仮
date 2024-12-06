@@ -6,8 +6,8 @@ def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir,
     """
     データセットをクラスごとに整理し、画像をリサイズして保存する。
     :param image_dir: 元の画像フォルダ（CelebAの全画像が含まれているフォルダ）
-    :param identity_file: ID情報が記載されたファイル（例: identity_CelebA.txt）
-    :param bbox_file: 顔領域（バウンディングボックス）情報ファイル（例: list_bbox_celeba_png.txt）
+    :param identity_file: PNG形式に変換されたID情報ファイル（例: identity_CelebA_png.txt）
+    :param bbox_file: PNG形式に変換されたバウンディングボックス情報ファイル（例: list_bbox_celeba_png.txt）
     :param output_dir: クラスごとに整理してリサイズした画像の保存先
     :param target_size: リサイズ後の画像サイズ (width, height)
     """
@@ -37,7 +37,7 @@ def organize_and_resize_dataset(image_dir, identity_file, bbox_file, output_dir,
             continue
 
         # バウンディングボックス情報を取得
-        bbox_row = bbox_data[bbox_data['image_id'] == image_name]  # 画像名は`.png`で一致
+        bbox_row = bbox_data[bbox_data['image_id'] == image_name]  # PNG形式で一致
         if bbox_row.empty:
             print(f"Warning: No bounding box found for {image_name}")
             continue
@@ -67,7 +67,7 @@ if __name__ == "__main__":
 
     # パス指定（相対パス）
     image_dir = os.path.join(base_dir, "data/img_align_celeba")  # 元画像フォルダ
-    identity_file = os.path.join(base_dir, "data/identity_CelebA.txt")  # ID情報ファイル
+    identity_file = os.path.join(base_dir, "data/identity_CelebA_png.txt")  # PNG対応のID情報ファイル
     bbox_file = os.path.join(base_dir, "data/list_bbox_celeba_png.txt")  # PNG対応のバウンディングボックス情報ファイル
     output_dir = os.path.join(base_dir, "processed_data")  # 出力フォルダ
 
