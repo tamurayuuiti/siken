@@ -9,7 +9,7 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 def confirm_and_reset_output_dir(output_dir):
     if os.path.exists(output_dir) and os.listdir(output_dir):
         response = input(f"Warning: '{output_dir}' already exists and contains data. Do you want to reset it? (yes/no): ").strip().lower()
-        if response == 'yes':
+        if response in ['yes', 'y']:  # 'yes' または 'y' なら処理を続行
             print("Resetting processed_data folder...")
             shutil.rmtree(output_dir)
             os.makedirs(output_dir, exist_ok=True)
@@ -113,13 +113,13 @@ def augment_data(input_dir, target_count=200):
         count = 1
 
         while generated < num_to_generate:
-            img_path = random.choice(images)  # ランダムに画像を選ぶ
+            img_path = random.choice(images)
             img = cv2.imread(img_path)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             img = img.astype('float32') / 255.0
             img = np.expand_dims(img, axis=0)
 
-            augmented_img = next(datagen.flow(img, batch_size=1))[0]  # 拡張画像生成
+            augmented_img = next(datagen.flow(img, batch_size=1))[0]
             augmented_img = (augmented_img * 255).astype(np.uint8)
             augmented_img = cv2.cvtColor(augmented_img, cv2.COLOR_RGB2BGR)
 
