@@ -116,7 +116,6 @@ def augment_data(input_dir, target_count=200):
     for class_idx, class_name in enumerate(class_dirs, start=1):
         class_path = os.path.join(input_dir, class_name)
         images = [os.path.join(class_path, img) for img in os.listdir(class_path)]
-        random.shuffle(images)  # ランダム化
         num_existing = len(images)
         num_to_generate = target_count - num_existing
 
@@ -130,9 +129,8 @@ def augment_data(input_dir, target_count=200):
             img = img.astype('float32') / 255.0
             img = np.expand_dims(img, axis=0)
 
-            for batch in datagen.flow(img, batch_size=1, save_to_dir=class_path,
-                                      save_prefix=f"aug_{str(count).zfill(3)}_{os.path.basename(img_path).split('.')[0]}",
-                                      save_format='png'):
+            prefix = f"aug_{str(count).zfill(3)}_{os.path.basename(img_path).split('.')[0]}"
+            for batch in datagen.flow(img, batch_size=1, save_to_dir=class_path, save_prefix=prefix, save_format='png'):
                 generated += 1
                 count += 1
                 if generated >= num_to_generate:
