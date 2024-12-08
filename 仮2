@@ -17,7 +17,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET_DIR = os.path.join(BASE_DIR, "processed_data")  # 学習データフォルダ
 EMBEDDING_DIR = os.path.join(BASE_DIR, "embeddings")  # 埋め込みベクトル保存フォルダ
 MODEL_DIR = os.path.join(BASE_DIR, "model")  # 学習済みモデル保存フォルダ
-NO_FACE_DIR = os.path.join(BASE_DIR, "不要ファイル/no_face_detected")  # 顔が検出できなかった画像の保存先
+NO_FACE_DIR = os.path.join(BASE_DIR, "unnecessary_file/no_face_detected")  # 顔が検出できなかった画像の保存先
 
 if not os.path.exists(EMBEDDING_DIR):
     os.makedirs(EMBEDDING_DIR)
