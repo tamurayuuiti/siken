@@ -38,7 +38,7 @@ def organize_and_resize_with_blurred_background(input_dir, output_dir, no_face_d
 
     for class_name in os.listdir(input_dir):
         class_path = os.path.join(input_dir, class_name)
-        if not os.path.isdir(class_path):
+        if not os.path.isdir(class_path) or class_name == "logs":  # logsフォルダを除外
             continue
 
         output_class_path = os.path.join(output_dir, class_name)
@@ -99,12 +99,17 @@ def blur_background(image, face_box, target_size):
 def augment_data(input_dir, output_log_dir, target_count=200):
     os.makedirs(output_log_dir, exist_ok=True)
 
-    class_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
+    class_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d)) and d != "logs"]
     total_classes = len(class_dirs)
 
     for class_idx, class_name in enumerate(class_dirs, start=1):
         class_path = os.path.join(input_dir, class_name)
         images = [os.path.join(class_path, img) for img in os.listdir(class_path) if img.lower().endswith(('jpg', 'jpeg', 'png'))]
+
+        if not images:
+            print(f"Warning: No images found in class '{class_name}'. Skipping this class.")
+            continue
+
         num_existing = len(images)
         num_to_generate = target_count - num_existing
 
@@ -122,14 +127,20 @@ def augment_data(input_dir, output_log_dir, target_count=200):
                 img = img.astype('float32') / 255.0
                 img = np.expand_dims(img, axis=0)
 
-                # ランダムな範囲選択
-                rotation = random.uniform(-random.choice([5, 15]), random.choice([5, 40]))
-                shear = random.uniform(-random.choice([0.05, 0.1]), random.choice([0.1, 0.2]))
+                rotation = random.uniform(-random.choice([5, 10]), random.choice([5, 20]))
+                width_shift = random.uniform(-random.choice([0.05, 0.1]), random.choice([0.05, 0.1]))
+                height_shift = random.uniform(-random.choice([0.05, 0.1]), random.choice([0.05, 0.1]))
+                shear = random.uniform(-random.choice([0.05, 0.1]), random.choice([0.05, 0.1]))
+                zoom = random.uniform(0.8, 1.2)
+                flip = random.choice([True, False])
 
                 datagen = ImageDataGenerator(
                     rotation_range=rotation,
+                    width_shift_range=width_shift,
+                    height_shift_range=height_shift,
                     shear_range=shear,
-                    horizontal_flip=random.choice([True, False]),
+                    zoom_range=zoom,
+                    horizontal_flip=flip,
                     fill_mode='nearest'
                 )
 
@@ -141,11 +152,10 @@ def augment_data(input_dir, output_log_dir, target_count=200):
                 save_path = os.path.join(class_path, save_name)
                 cv2.imwrite(save_path, augmented_img)
 
-                log_file.write(f"{save_name}: rotation={rotation:.2f}, shear={shear:.2f}\n")
+                log_file.write(f"{save_name}: rotation={rotation:.2f}, width_shift={width_shift:.2f}, height_shift={height_shift:.2f}, shear={shear:.2f}, zoom={zoom:.2f}, flip={flip}\n")
 
                 generated += 1
                 count += 1
-
                 progress = f"Class {class_idx}/{total_classes} - Generated: {generated}/{num_to_generate}"
                 sys.stdout.write(f"\r{progress}")
                 sys.stdout.flush()
