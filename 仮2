@@ -3,6 +3,7 @@ import sys
 import cv2
 import numpy as np
 import insightface
+from tqdm import tqdm  # 進捗バーライブラリ
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, Input
 from tensorflow.keras.optimizers import Adam
@@ -44,7 +45,7 @@ def extract_face_embeddings(image_path):
     
     faces = app.get(img)  # 顔検出と顔埋め込みベクトルの取得
     if len(faces) == 0:
-        sys.stderr.write(f"\nNo face detected in {image_path}")
+        sys.stderr.write(f"No face detected in {image_path}\n")
         return None
     
     return faces[0].embedding  # 最初に検出された顔の埋め込みベクトル
@@ -63,7 +64,6 @@ def generate_embeddings(dataset_dir, embedding_save_path):
     class_indices = {}
 
     total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))  # 総ファイル数
-    processed_files = 0
 
     for class_idx, class_name in enumerate(sorted(os.listdir(dataset_dir))):
         class_path = os.path.join(dataset_dir, class_name)
@@ -73,22 +73,14 @@ def generate_embeddings(dataset_dir, embedding_save_path):
         print(f"\nProcessing class '{class_name}'...")
 
         class_files = [img_name for img_name in os.listdir(class_path) if img_name.lower().endswith(('jpg', 'jpeg', 'png'))]
-        total_class_files = len(class_files)
-
-        for idx, img_name in enumerate(class_files, start=1):
+        
+        # tqdmでクラスごとの進捗バーを表示
+        for img_name in tqdm(class_files, desc=f"Class '{class_name}'", leave=True, unit="img"):
             img_path = os.path.join(class_path, img_name)
             embedding = extract_face_embeddings(img_path)
             if embedding is not None:
                 embeddings.append(embedding)
                 labels.append(class_idx)
-            processed_files += 1
-
-            # 同じ行に進捗表示
-            progress = (processed_files / total_files) * 100
-            sys.stdout.write(f"\rClass '{class_name}': {idx}/{total_class_files} images processed | Total Progress: {progress:.2f}%")
-            sys.stdout.flush()
-
-        print()  # クラスの処理が終わったら改行
 
     print("\nAll embeddings generated.")
     # 保存
