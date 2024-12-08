@@ -124,36 +124,30 @@ def augment_data(input_dir, output_log_dir, target_count=200):
             while generated < num_to_generate:
                 img_path = random.choice(images)
                 img = cv2.imread(img_path)
-                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img = img.astype('float32') / 255.0
-                img = np.expand_dims(img, axis=0)
 
-                # 回転の範囲設定
+                # 拡張パラメータをランダム設定
                 rotation_range = random.choices([(-20, -5), (5, 45)], weights=[0.4, 0.6])[0]
                 rotation = round(random.uniform(*rotation_range), 2)
 
-                # シアーの確率的実行
-                shear = 0.00
-                if random.random() < 0.7:  # 70%の確率で実行
-                    shear_range = random.choices([(-0.15, -0.05), (0.05, 0.15)], weights=[0.5, 0.5])[0]
-                    shear = round(random.uniform(*shear_range), 2)
+                shear_range = random.choices([(-0.15, -0.05), (0.05, 0.15)], weights=[0.5, 0.5])[0]
+                shear = round(random.uniform(*shear_range), 2)
 
-                datagen = ImageDataGenerator(
-                    rotation_range=rotation,
-                    shear_range=shear,
-                    horizontal_flip=random.choice([True, False]),
-                    fill_mode='nearest'
-                )
+                flip = random.choices([True, False], weights=[0.25, 0.75])[0]
 
-                augmented_img = next(datagen.flow(img, batch_size=1))[0]
-                augmented_img = (augmented_img * 255).astype(np.uint8)
-                augmented_img = cv2.cvtColor(augmented_img, cv2.COLOR_RGB2BGR)
+                # 拡張を手動適用
+                transform_parameters = {
+                    'theta': rotation,             # 回転
+                    'shear': shear,                # シアー
+                    'flip_horizontal': flip        # 左右反転
+                }
+                datagen = ImageDataGenerator()
+                augmented_img = datagen.apply_transform(img, transform_parameters)
 
                 save_name = f"aug_{str(count).zfill(3)}_{os.path.basename(img_path)}"
                 save_path = os.path.join(class_path, save_name)
                 cv2.imwrite(save_path, augmented_img)
 
-                log_file.write(f"{save_name:<22} rotation={rotation:>6.2f}, shear={shear:>6.2f}\n")
+                log_file.write(f"{save_name:<22} rotation={rotation:>6.2f}, shear={shear:>6.2f}, flip={flip}\n")
 
                 generated += 1
                 count += 1
