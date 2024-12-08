@@ -11,8 +11,11 @@ def confirm_and_reset_output_dir(output_dir):
         while True:
             response = input(f"Warning: '{output_dir}' already exists and contains data. Do you want to reset it? (yes/no): ").strip().lower()
             if response in ['yes', 'y']:
-                print("Resetting processed_data folder...")
+                print("Deleting processed_data folder...")
                 shutil.rmtree(output_dir)  # フォルダ削除
+                while os.path.exists(output_dir):  # 完全に削除されたことを確認
+                    pass
+                print("Deletion complete. Proceeding with further processing...")
                 os.makedirs(output_dir, exist_ok=True)  # 新たに作成
                 break
             elif response in ['no', 'n']:
@@ -129,10 +132,10 @@ def augment_data(input_dir, output_log_dir, target_count=200):
                 rotation_range = random.choices([(-20, -5), (5, 45)], weights=[0.4, 0.6])[0]
                 rotation = round(random.uniform(*rotation_range), 2)
 
-                shear_range = random.choices([(-0.15, -0.05), (0.05, 0.15)], weights=[0.5, 0.5])[0]
+                shear_range = random.choices([(-0.25, -0.05), (0.05, 0.25)], weights=[0.5, 0.5])[0]
                 shear = round(random.uniform(*shear_range), 2)
 
-                flip = random.choices([True, False], weights=[0.25, 0.75])[0]
+                flip = random.choices([True, False], weights=[0.35, 0.65])[0]
 
                 # 拡張を手動適用
                 transform_parameters = {
