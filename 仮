@@ -7,20 +7,19 @@ import random
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 def confirm_and_reset_output_dir(output_dir):
-    if os.path.exists(output_dir) and os.listdir(output_dir):
+    if os.path.exists(output_dir):
         while True:
             response = input(f"Warning: '{output_dir}' already exists and contains data. Do you want to reset it? (yes/no): ").strip().lower()
             if response in ['yes', 'y']:
                 print("Resetting processed_data folder...")
-                shutil.rmtree(output_dir)
-                os.makedirs(output_dir, exist_ok=True)
+                shutil.rmtree(output_dir)  # フォルダ削除
+                os.makedirs(output_dir, exist_ok=True)  # 新たに作成
                 break
             elif response in ['no', 'n']:
                 print("Aborting process.")
                 sys.exit(0)
             else:
                 print("Invalid input. Please enter 'yes' or 'no'.")
-
     else:
         os.makedirs(output_dir, exist_ok=True)
 
@@ -128,18 +127,20 @@ def augment_data(input_dir, output_log_dir, target_count=200):
                 img = img.astype('float32') / 255.0
                 img = np.expand_dims(img, axis=0)
 
-                # 確率に基づく回転範囲の選択
+                # 回転とシアーの範囲設定
                 rotation_range = random.choices([(-20, -5), (5, 45)], weights=[0.4, 0.6])[0]
                 rotation = round(random.uniform(*rotation_range), 2)
 
-                # 確率に基づくシアー範囲の選択
                 shear_range = random.choices([(-0.15, -0.05), (0.05, 0.15)], weights=[0.5, 0.5])[0]
                 shear = round(random.uniform(*shear_range), 2)
+
+                # 25%の確率で左右反転を追加
+                horizontal_flip = random.choices([True, False], weights=[0.25, 0.75])[0]
 
                 datagen = ImageDataGenerator(
                     rotation_range=rotation,
                     shear_range=shear,
-                    horizontal_flip=random.choice([True, False]),
+                    horizontal_flip=horizontal_flip,
                     fill_mode='nearest'
                 )
 
@@ -151,7 +152,7 @@ def augment_data(input_dir, output_log_dir, target_count=200):
                 save_path = os.path.join(class_path, save_name)
                 cv2.imwrite(save_path, augmented_img)
 
-                log_file.write(f"{save_name:<22} rotation={rotation:>6.2f}, shear={shear:>6.2f}\n")
+                log_file.write(f"{save_name:<22} rotation={rotation:>6.2f}, shear={shear:>6.2f}, flip={horizontal_flip}\n")
 
                 generated += 1
                 count += 1
