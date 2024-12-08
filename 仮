@@ -27,7 +27,7 @@ def confirm_and_reset_output_dir(output_dir):
     else:
         os.makedirs(output_dir, exist_ok=True)
 
-def organize_and_resize_with_blurred_background(input_dir, output_dir, no_face_dir, target_size=(112, 112)):
+def organize_and_resize_with_blurred_background(input_dir, output_dir, no_face_dir, target_size=(224, 224)):
     cascades_dir = os.path.join(os.path.dirname(__file__), "cascades")
     model_file = os.path.join(cascades_dir, "deploy.prototxt")
     weights_file = os.path.join(cascades_dir, "res10_300x300_ssd_iter_140000.caffemodel")
@@ -169,5 +169,5 @@ if __name__ == "__main__":
     log_dir = os.path.join(processed_dir, "~logs")
 
     confirm_and_reset_output_dir(processed_dir)
-    organize_and_resize_with_blurred_background(input_dir, processed_dir, no_face_dir, target_size=(112, 112))
+    organize_and_resize_with_blurred_background(input_dir, processed_dir, no_face_dir, target_size=(224, 224))
     augment_data(processed_dir, log_dir, target_count=200)
