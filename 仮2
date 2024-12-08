@@ -17,7 +17,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATASET_DIR = os.path.join(BASE_DIR, "processed_data")  # 学習データフォルダ
 EMBEDDING_DIR = os.path.join(BASE_DIR, "embeddings")  # 埋め込みベクトル保存フォルダ
 MODEL_DIR = os.path.join(BASE_DIR, "model")  # 学習済みモデル保存フォルダ
-NO_FACE_DIR = os.path.join(BASE_DIR, "no_face_detected")  # 顔が検出されなかった画像保存フォルダ
+NO_FACE_DIR = os.path.join(BASE_DIR, "不要ファイル/no_face_detected")  # 顔が検出できなかった画像の保存先
 
 if not os.path.exists(EMBEDDING_DIR):
     os.makedirs(EMBEDDING_DIR)
@@ -71,8 +71,6 @@ def generate_embeddings(dataset_dir, embedding_save_path):
     class_indices = {}
 
     total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))  # 総ファイル数
-    processed_files = 0
-    no_face_count_total = 0  # 全体の顔検出失敗数
 
     for class_idx, class_name in enumerate(sorted(os.listdir(dataset_dir))):
         class_path = os.path.join(dataset_dir, class_name)
@@ -82,35 +80,34 @@ def generate_embeddings(dataset_dir, embedding_save_path):
         print(f"\nProcessing class '{class_name}'...")
 
         class_files = [img_name for img_name in os.listdir(class_path) if img_name.lower().endswith(('jpg', 'jpeg', 'png'))]
-        
-        no_face_count = 0  # クラスごとの顔検出失敗数
-        start_time = time.time()
+        no_face_count = 0  # 顔が検出されなかった画像のカウント
 
+        # クラスごとの処理時間を計測
+        start_time = time.time()
+        
         # tqdmでクラスごとの進捗バーを表示
-        for img_name in tqdm(class_files, desc=f"Class '{class_name}'", leave=False, unit="img"):
+        for idx, img_name in enumerate(class_files, start=1):
             img_path = os.path.join(class_path, img_name)
             embedding = extract_face_embeddings(img_path)
-
             if embedding is not None:
                 embeddings.append(embedding)
                 labels.append(class_idx)
             else:
                 no_face_count += 1
-                no_face_count_total += 1
-                # 顔検出失敗画像を保存
-                save_path = os.path.join(NO_FACE_DIR, f"{class_name}_{img_name}")
+                # 顔が検出されなかった画像を保存
+                save_path = os.path.join(NO_FACE_DIR, img_name)
                 cv2.imwrite(save_path, cv2.imread(img_path))
 
-            processed_files += 1
-            overall_progress = (processed_files / total_files) * 100
-            tqdm.write(f"\rClass '{class_name}': {len(embeddings)}/{len(class_files)} images processed | "
-                       f"No face: {no_face_count} | Overall Progress: {overall_progress:.2f}%", end="")
-
+            # 進捗表示の更新
+            progress = (idx / len(class_files)) * 100
+            sys.stdout.write(f"\rClass '{class_name}': {idx}/{len(class_files)} images processed | No face: {no_face_count} | Progress: {progress:.2f}%")
+            sys.stdout.flush()
+        
         end_time = time.time()
         elapsed_time = end_time - start_time
-        print(f"\nClass '{class_name}' completed in {elapsed_time:.2f} seconds. No face: {no_face_count}")
+        print(f"\nClass '{class_name}' completed in {elapsed_time:.2f} seconds.")
 
-    print(f"\nAll embeddings generated. Total no face images: {no_face_count_total}")
+    print("\nAll embeddings generated.")
     # 保存
     np.savez(embedding_save_path, embeddings=np.array(embeddings), labels=np.array(labels))
     print(f"Embeddings and labels saved to {embedding_save_path}")
