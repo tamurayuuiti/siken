@@ -1,0 +1,148 @@
+import os
+import cv2
+import numpy as np
+import insightface
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, Input
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.utils import to_categorical
+
+# ---------------------------------------------
+# パス設定と初期化
+# ---------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATASET_DIR = os.path.join(BASE_DIR, "processed_data")  # 学習データフォルダ
+EMBEDDING_DIR = os.path.join(BASE_DIR, "embeddings")  # 埋め込みベクトル保存フォルダ
+MODEL_DIR = os.path.join(BASE_DIR, "model")  # 学習済みモデル保存フォルダ
+
+if not os.path.exists(EMBEDDING_DIR):
+    os.makedirs(EMBEDDING_DIR)
+if not os.path.exists(MODEL_DIR):
+    os.makedirs(MODEL_DIR)
+
+# ---------------------------------------------
+# ArcFaceモデルの準備
+# ---------------------------------------------
+print("Loading ArcFace model...")
+app = insightface.app.FaceAnalysis(name='buffalo_l')  # InsightFaceの事前学習済みモデル
+app.prepare(ctx_id=0, det_size=(224, 224))  # GPUを使用（ctx_id=0）
+
+# ---------------------------------------------
+# 顔埋め込みベクトルの抽出
+# ---------------------------------------------
+def extract_face_embeddings(image_path):
+    """
+    ArcFaceを使用して画像から顔埋め込みベクトルを取得する。
+    :param image_path: 画像のパス
+    :return: 顔の埋め込みベクトル（またはNone）
+    """
+    img = cv2.imread(image_path)
+    if img is None:
+        print(f"Error: Unable to load image {image_path}")
+        return None
+    
+    faces = app.get(img)  # 顔検出と顔埋め込みベクトルの取得
+    if len(faces) == 0:
+        print(f"No face detected in {image_path}")
+        return None
+    
+    return faces[0].embedding  # 最初に検出された顔の埋め込みベクトル
+
+# ---------------------------------------------
+# データセットの処理（埋め込みベクトルの生成）
+# ---------------------------------------------
+def generate_embeddings(dataset_dir, embedding_save_path):
+    """
+    データセットの各画像から埋め込みベクトルを生成し保存する。
+    :param dataset_dir: データセットフォルダのパス（クラスごとにフォルダ分け）
+    :param embedding_save_path: 保存先のパス
+    """
+    embeddings = []
+    labels = []
+    class_indices = {}
+
+    total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))  # 総ファイル数
+    processed_files = 0
+
+    for class_idx, class_name in enumerate(sorted(os.listdir(dataset_dir))):
+        class_path = os.path.join(dataset_dir, class_name)
+        if not os.path.isdir(class_path) or class_name in ["no_face_data", "~logs"]:
+            continue  # 不要なフォルダを除外
+        class_indices[class_idx] = class_name  # クラス名をそのまま使用
+        print(f"Processing class '{class_name}'...")
+
+        class_files = [img_name for img_name in os.listdir(class_path) if img_name.lower().endswith(('jpg', 'jpeg', 'png'))]
+        total_class_files = len(class_files)
+
+        for idx, img_name in enumerate(class_files, start=1):
+            img_path = os.path.join(class_path, img_name)
+            embedding = extract_face_embeddings(img_path)
+            if embedding is not None:
+                embeddings.append(embedding)
+                labels.append(class_idx)
+            processed_files += 1
+
+            # クラス内および全体の進捗表示
+            progress = (processed_files / total_files) * 100
+            sys.stdout.write(f"\rClass '{class_name}': {idx}/{total_class_files} images processed | Total Progress: {progress:.2f}%")
+            sys.stdout.flush()
+
+    print("\nAll embeddings generated.")
+    # 保存
+    np.savez(embedding_save_path, embeddings=np.array(embeddings), labels=np.array(labels))
+    print(f"Embeddings and labels saved to {embedding_save_path}")
+    return class_indices
+
+# ---------------------------------------------
+# 分類モデルの構築
+# ---------------------------------------------
+def build_classification_model(input_dim, num_classes):
+    """
+    ArcFaceの埋め込みベクトルを入力とする分類モデルを構築。
+    :param input_dim: 入力次元数（ArcFaceの埋め込みベクトルのサイズ）
+    :param num_classes: クラス数
+    :return: Kerasモデル
+    """
+    model = Sequential([
+        Input(shape=(input_dim,)),
+        Dense(256, activation='relu'),
+        Dropout(0.5),
+        Dense(128, activation='relu'),
+        Dropout(0.5),
+        Dense(num_classes, activation='softmax')
+    ])
+    model.compile(optimizer=Adam(learning_rate=0.0001),
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+    return model
+
+# ---------------------------------------------
+# メイン処理
+# ---------------------------------------------
+if __name__ == "__main__":
+    # 埋め込みベクトルの生成
+    embedding_file = os.path.join(EMBEDDING_DIR, "face_embeddings.npz")
+    class_indices = generate_embeddings(DATASET_DIR, embedding_file)
+
+    # 埋め込みベクトルの読み込み
+    data = np.load(embedding_file)
+    X = data['embeddings']
+    y = data['labels']
+    y = to_categorical(y, num_classes=len(class_indices))
+
+    # 分類モデルの構築と学習
+    print("Building and training classification model...")
+    model = build_classification_model(input_dim=X.shape[1], num_classes=len(class_indices))
+    model.fit(X, y, validation_split=0.2, epochs=30, batch_size=32)
+
+    # モデルの保存
+    model_path = os.path.join(MODEL_DIR, "arcface_classification_model.h5")
+    model.save(model_path)
+    print(f"Model saved to {model_path}")
+
+    # クラス名の保存
+    class_indices_path = os.path.join(MODEL_DIR, "class_indices.txt")
+    with open(class_indices_path, 'w') as f:
+        for idx, name in class_indices.items():
+            f.write(f"{idx}: {name}\n")
+    print(f"Class indices saved to {class_indices_path}")
