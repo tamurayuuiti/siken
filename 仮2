@@ -1,4 +1,5 @@
 import os
+import sys  # sysモジュールのインポート
 import cv2
 import numpy as np
 import insightface
@@ -24,8 +25,13 @@ if not os.path.exists(MODEL_DIR):
 # ArcFaceモデルの準備
 # ---------------------------------------------
 print("Loading ArcFace model...")
-app = insightface.app.FaceAnalysis(name='buffalo_l')  # InsightFaceの事前学習済みモデル
-app.prepare(ctx_id=0, det_size=(224, 224))  # GPUを使用（ctx_id=0）
+try:
+    app = insightface.app.FaceAnalysis(name='buffalo_l')  # InsightFaceの事前学習済みモデル
+    app.prepare(ctx_id=0, det_size=(224, 224))  # GPUを使用（ctx_id=0）
+except Exception as e:
+    print("GPU not available, switching to CPU...")
+    app = insightface.app.FaceAnalysis(name='buffalo_l')
+    app.prepare(ctx_id=-1, det_size=(224, 224))  # CPUを使用（ctx_id=-1）
 
 # ---------------------------------------------
 # 顔埋め込みベクトルの抽出
