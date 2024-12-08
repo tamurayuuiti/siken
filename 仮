@@ -8,7 +8,7 @@ from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 def confirm_and_reset_output_dir(output_dir):
     if os.path.exists(output_dir) and os.listdir(output_dir):
-        while True:  # 無効な入力に対して再入力を求める
+        while True:
             response = input(f"Warning: '{output_dir}' already exists and contains data. Do you want to reset it? (yes/no): ").strip().lower()
             if response in ['yes', 'y']:
                 print("Resetting processed_data folder...")
@@ -32,7 +32,7 @@ def organize_and_resize_with_blurred_background(input_dir, output_dir, no_face_d
 
     os.makedirs(no_face_dir, exist_ok=True)
 
-    total_images = sum(len(files) for _, _, files in os.walk(input_dir))
+    total_images = sum(len([f for f in files if f.lower().endswith(('jpg', 'jpeg', 'png'))]) for _, _, files in os.walk(input_dir))
     processed_images = 0
     no_face_count = 0
 
@@ -45,6 +45,8 @@ def organize_and_resize_with_blurred_background(input_dir, output_dir, no_face_d
         os.makedirs(output_class_path, exist_ok=True)
 
         for img_name in os.listdir(class_path):
+            if not img_name.lower().endswith(('jpg', 'jpeg', 'png')):
+                continue
             img_path = os.path.join(class_path, img_name)
             img = cv2.imread(img_path)
 
@@ -79,7 +81,7 @@ def organize_and_resize_with_blurred_background(input_dir, output_dir, no_face_d
                 cv2.imwrite(no_face_path, img)
 
             processed_images += 1
-            progress = f"Processing: {processed_images}/{total_images} ({(processed_images / total_images) * 100:.2f}%) - No Face: {no_face_count}"
+            progress = f"Processed: {processed_images}/{total_images} ({(processed_images / total_images) * 100:.2f}%) - No Face: {no_face_count}"
             sys.stdout.write(f"\r{progress}")
             sys.stdout.flush()
 
@@ -94,21 +96,22 @@ def blur_background(image, face_box, target_size):
     blurred_image[max(0, y1):min(y2, image.shape[0]), max(0, x1):min(x2, image.shape[1])] = face
     return cv2.resize(blurred_image, target_size)
 
-def augment_data(input_dir, target_count=200):
+def augment_data(input_dir, output_log_dir, target_count=200):
+    os.makedirs(output_log_dir, exist_ok=True)
+
     class_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d))]
     total_classes = len(class_dirs)
 
     for class_idx, class_name in enumerate(class_dirs, start=1):
         class_path = os.path.join(input_dir, class_name)
-        images = [os.path.join(class_path, img) for img in os.listdir(class_path)]
+        images = [os.path.join(class_path, img) for img in os.listdir(class_path) if img.lower().endswith(('jpg', 'jpeg', 'png'))]
         num_existing = len(images)
         num_to_generate = target_count - num_existing
 
         generated = 0
         count = 1
 
-        # テキストファイルで拡張情報を記録
-        log_file_path = os.path.join(class_path, "augmentation_log.txt")
+        log_file_path = os.path.join(output_log_dir, f"{class_name}_log.txt")
         with open(log_file_path, "w") as log_file:
             log_file.write("Augmentation Details:\n")
 
@@ -119,21 +122,14 @@ def augment_data(input_dir, target_count=200):
                 img = img.astype('float32') / 255.0
                 img = np.expand_dims(img, axis=0)
 
-                # ランダムな拡張値を記録
-                rotation = random.uniform(-15, 40)
-                width_shift = random.uniform(-0.1, 0.2)
-                height_shift = random.uniform(-0.1, 0.2)
-                shear = random.uniform(-0.1, 0.2)
-                zoom = random.uniform(0.1, 0.2)
-                flip = random.choice([True, False])
+                # ランダムな範囲選択
+                rotation = random.uniform(-random.choice([5, 15]), random.choice([5, 40]))
+                shear = random.uniform(-random.choice([0.05, 0.1]), random.choice([0.1, 0.2]))
 
                 datagen = ImageDataGenerator(
                     rotation_range=rotation,
-                    width_shift_range=width_shift,
-                    height_shift_range=height_shift,
                     shear_range=shear,
-                    zoom_range=zoom,
-                    horizontal_flip=flip,
+                    horizontal_flip=random.choice([True, False]),
                     fill_mode='nearest'
                 )
 
@@ -145,16 +141,16 @@ def augment_data(input_dir, target_count=200):
                 save_path = os.path.join(class_path, save_name)
                 cv2.imwrite(save_path, augmented_img)
 
-                # ログに詳細データを書き込む
-                log_file.write(f"{save_name}: rotation={rotation:.2f}, width_shift={width_shift:.2f}, height_shift={height_shift:.2f}, shear={shear:.2f}, zoom={zoom:.2f}, flip={flip}\n")
+                log_file.write(f"{save_name}: rotation={rotation:.2f}, shear={shear:.2f}\n")
 
                 generated += 1
                 count += 1
-                progress = f"Generating: {generated}/{num_to_generate}"
+
+                progress = f"Class {class_idx}/{total_classes} - Generated: {generated}/{num_to_generate}"
                 sys.stdout.write(f"\r{progress}")
                 sys.stdout.flush()
 
-            print(f"\nClass {class_idx}/{total_classes}: '{class_name}' - Total images: {len(os.listdir(class_path))} (Target: {target_count})")
+            print(f"\nClass {class_idx}/{total_classes}: '{class_name}' completed.")
 
 if __name__ == "__main__":
     base_dir = os.path.dirname(os.path.abspath(__file__))
@@ -162,7 +158,8 @@ if __name__ == "__main__":
     input_dir = os.path.join(base_dir, "dataset")
     processed_dir = os.path.join(base_dir, "processed_data")
     no_face_dir = os.path.join(base_dir, "no_face_data")
+    log_dir = os.path.join(processed_dir, "logs")
 
     confirm_and_reset_output_dir(processed_dir)
     organize_and_resize_with_blurred_background(input_dir, processed_dir, no_face_dir, target_size=(112, 112))
-    augment_data(processed_dir, target_count=200)
+    augment_data(processed_dir, log_dir, target_count=200)
