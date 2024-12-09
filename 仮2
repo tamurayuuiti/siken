@@ -69,11 +69,13 @@ def extract_face_embeddings(image_path):
     faces = app.get(img)
     arcface_embedding = faces[0].embedding if len(faces) > 0 else None
 
-    # ArcFace埋め込みの強化
-    if arcface_embedding is not None:
-        arcface_embedding = np.expand_dims(arcface_embedding, axis=0)  # 1次元→2次元変換
-        arcface_embedding = Dense(128, activation='relu')(arcface_embedding)
-        arcface_embedding = tf.squeeze(arcface_embedding)  # 2次元→1次元に戻す
+# ArcFace埋め込みの強化
+if arcface_embedding is not None:
+    arcface_embedding = np.expand_dims(arcface_embedding, axis=0)  # 1次元→2次元変換
+    arcface_embedding = tf.convert_to_tensor(arcface_embedding, dtype=tf.float32)  # NumPy配列 → TensorFlowテンソル
+    arcface_embedding = Dense(128, activation='relu')(arcface_embedding)
+    arcface_embedding = tf.squeeze(arcface_embedding)  # 2次元→1次元に戻す
+
 
     # EfficientNetB0埋め込み
     img_resized = cv2.resize(img, (224, 224))
