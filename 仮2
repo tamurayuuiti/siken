@@ -8,7 +8,7 @@ from tqdm import tqdm  # 進捗バーライブラリ
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate, GlobalAveragePooling2D
+from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import to_categorical
 import tensorflow as tf  # TensorFlowインポート
@@ -41,15 +41,10 @@ except Exception as e:
     app = insightface.app.FaceAnalysis(name='buffalo_l')
     app.prepare(ctx_id=-1, det_size=(224, 224))  # CPUを使用（ctx_id=-1）
 
-print("Loading EfficientNetB0 model for fine-tuning...")
+print("Loading EfficientNetB0 model for feature extraction...")
 base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-for layer in base_efficientnet.layers[:-20]:  # 最後の20層のみ学習可能にする
-    layer.trainable = False
-
-# EfficientNetB0 出力用の中間層
 x = base_efficientnet.output
-x = GlobalAveragePooling2D()(x)
-efficientnet_output = Dense(512, activation='relu', name="efficientnet_embedding")(x)
+efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
 fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
 
 # ---------------------------------------------
@@ -68,14 +63,6 @@ def extract_face_embeddings(image_path):
     # ArcFace埋め込み
     faces = app.get(img)
     arcface_embedding = faces[0].embedding if len(faces) > 0 else None
-
-# ArcFace埋め込みの強化
-if arcface_embedding is not None:
-    arcface_embedding = np.expand_dims(arcface_embedding, axis=0)  # 1次元→2次元変換
-    arcface_embedding = tf.convert_to_tensor(arcface_embedding, dtype=tf.float32)  # NumPy配列 → TensorFlowテンソル
-    arcface_embedding = Dense(128, activation='relu')(arcface_embedding)
-    arcface_embedding = tf.squeeze(arcface_embedding)  # 2次元→1次元に戻す
-
 
     # EfficientNetB0埋め込み
     img_resized = cv2.resize(img, (224, 224))
@@ -143,14 +130,14 @@ def build_combined_model(input_dim1, input_dim2, num_classes):
     input2 = Input(shape=(input_dim2,))
     combined = Concatenate()([input1, input2])
 
-    x = Dense(512, activation='relu')(combined)
+    x = Dense(1024, activation='relu')(combined)  # ネットワークの強化
     x = Dropout(0.5)(x)
-    x = Dense(256, activation='relu')(x)
+    x = Dense(512, activation='relu')(x)
     x = Dropout(0.5)(x)
     output = Dense(num_classes, activation='softmax')(x)
 
     model = Model(inputs=[input1, input2], outputs=output)
-    model.compile(optimizer=Adam(learning_rate=0.0001),
+    model.compile(optimizer=Adam(learning_rate=0.00005),
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
     return model
@@ -176,5 +163,5 @@ if __name__ == "__main__":
     model.save(model_path)
     print(f"Model saved to {model_path}")
 
-# Ver 1.05  
-# 修正ルール: 修正時にバージョンを0.01ずつ増加させ、完全なコードを出力する。
+# Ver 1.06  
+# 修正ルール: ArcFaceをメインモデル、EfficientNetB0を補助モデルに変更し、完全なコードを出力。
