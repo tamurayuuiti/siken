@@ -6,10 +6,11 @@ import numpy as np
 import insightface
 from tqdm import tqdm  # 進捗バーライブラリ
 from tensorflow.keras.applications import EfficientNetB0
-from tensorflow.keras.models import Sequential, Model
+from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate, GlobalAveragePooling2D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import to_categorical
+from sklearn.model_selection import train_test_split  # データ分割用
 
 # ---------------------------------------------
 # パス設定と初期化
@@ -28,7 +29,7 @@ if not os.path.exists(NO_FACE_DIR):
     os.makedirs(NO_FACE_DIR)
 
 # ---------------------------------------------
-# ArcFaceモデルとEfficientNetB0の準備
+# EfficientNetB0 と ArcFace の準備
 # ---------------------------------------------
 print("Loading ArcFace model...")
 try:
@@ -39,12 +40,8 @@ except Exception as e:
     app = insightface.app.FaceAnalysis(name='buffalo_l')
     app.prepare(ctx_id=-1, det_size=(224, 224))  # CPUを使用（ctx_id=-1）
 
-print("Loading EfficientNetB0 model for fine-tuning...")
+print("Loading EfficientNetB0 model...")
 base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-for layer in base_efficientnet.layers[:-20]:  # 最後の20層以外を凍結
-    layer.trainable = False
-
-# EfficientNetB0 出力用の中間層
 x = base_efficientnet.output
 x = GlobalAveragePooling2D()(x)
 x = Dense(256, activation='relu', name="efficientnet_embedding")(x)
@@ -55,38 +52,37 @@ fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=x)
 # ---------------------------------------------
 def extract_face_embeddings(image_path):
     """
-    ArcFaceとEfficientNetB0を使用して画像から埋め込みベクトルを取得する。
+    EfficientNetB0とArcFaceを使用して画像から埋め込みベクトルを取得する。
     :param image_path: 画像のパス
-    :return: (ArcFace埋め込みベクトル, EfficientNetB0埋め込みベクトル)
+    :return: (EfficientNetB0埋め込みベクトル, ArcFace補助埋め込みベクトル)
     """
     img = cv2.imread(image_path)
     if img is None:
         return None, None, img
-
-    # ArcFace埋め込み
-    faces = app.get(img)
-    arcface_embedding = faces[0].embedding if len(faces) > 0 else None
 
     # EfficientNetB0埋め込み
     img_resized = cv2.resize(img, (224, 224))
     img_array = np.expand_dims(img_resized / 255.0, axis=0)
     efficientnet_embedding = fine_tuned_efficientnet.predict(img_array, verbose=0)
 
-    return arcface_embedding, efficientnet_embedding, img
+    # ArcFace埋め込み（高性能化）
+    faces = app.get(img)
+    arcface_embedding = None
+    if len(faces) > 0:
+        arcface_embedding = faces[0].embedding
+        arcface_embedding = np.expand_dims(arcface_embedding, axis=0)
+        arcface_embedding = Dense(128, activation='relu')(arcface_embedding).flatten()  # 高性能化
+
+    return efficientnet_embedding, arcface_embedding, img
 
 # ---------------------------------------------
 # データセットの処理（埋め込みベクトルの生成）
 # ---------------------------------------------
 def generate_embeddings(dataset_dir, embedding_save_path):
-    """
-    データセットの各画像からArcFaceとEfficientNetB0の埋め込みベクトルを生成し保存する。
-    """
-    arcface_embeddings = []
     efficientnet_embeddings = []
+    arcface_embeddings = []
     labels = []
     class_indices = {}
-
-    total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))  # 総ファイル数
 
     for class_idx, class_name in enumerate(sorted(os.listdir(dataset_dir))):
         class_path = os.path.join(dataset_dir, class_name)
@@ -96,39 +92,30 @@ def generate_embeddings(dataset_dir, embedding_save_path):
         print(f"\nProcessing class '{class_name}'...")
 
         class_files = [img_name for img_name in os.listdir(class_path) if img_name.lower().endswith(('jpg', 'jpeg', 'png'))]
-        no_face_count = 0
 
-        start_time = time.time()
         for img_name in tqdm(class_files, desc=f"Class '{class_name}'", leave=True, unit="img"):
             img_path = os.path.join(class_path, img_name)
-            arcface_embedding, efficientnet_embedding, img = extract_face_embeddings(img_path)
-            if arcface_embedding is not None and efficientnet_embedding is not None:
-                arcface_embeddings.append(arcface_embedding)
-                efficientnet_embeddings.append(efficientnet_embedding.flatten())
+            efficientnet_emb, arcface_emb, img = extract_face_embeddings(img_path)
+            if efficientnet_emb is not None and arcface_emb is not None:
+                efficientnet_embeddings.append(efficientnet_emb.flatten())
+                arcface_embeddings.append(arcface_emb)
                 labels.append(class_idx)
             else:
-                no_face_count += 1
                 save_path = os.path.join(NO_FACE_DIR, f"{class_name}_{img_name}")
                 if img is not None:
                     cv2.imwrite(save_path, img)
 
-        end_time = time.time()
-        print(f"Class '{class_name}' completed in {end_time - start_time:.2f} seconds | No face detected: {no_face_count}")
-
     np.savez(embedding_save_path,
-             arcface_embeddings=np.array(arcface_embeddings),
              efficientnet_embeddings=np.array(efficientnet_embeddings),
+             arcface_embeddings=np.array(arcface_embeddings),
              labels=np.array(labels))
     print(f"Embeddings and labels saved to {embedding_save_path}")
     return class_indices
 
 # ---------------------------------------------
-# 分類モデルの構築
+# モデルの構築
 # ---------------------------------------------
 def build_combined_model(input_dim1, input_dim2, num_classes):
-    """
-    ArcFaceとEfficientNetB0の埋め込みベクトルを入力とする分類モデルを構築。
-    """
     input1 = Input(shape=(input_dim1,))
     input2 = Input(shape=(input_dim2,))
     combined = Concatenate()([input1, input2])
@@ -153,18 +140,22 @@ if __name__ == "__main__":
     class_indices = generate_embeddings(DATASET_DIR, embedding_file)
 
     data = np.load(embedding_file)
-    X1 = data['arcface_embeddings']
-    X2 = data['efficientnet_embeddings']
+    X1 = data['efficientnet_embeddings']
+    X2 = data['arcface_embeddings']
     y = data['labels']
     y = to_categorical(y, num_classes=len(class_indices))
 
+    # データ分割（ランダムシャッフル）
+    X1_train, X1_val, X2_train, X2_val, y_train, y_val = train_test_split(
+        X1, X2, y, test_size=0.2, random_state=42, shuffle=True)
+
     print("Building and training combined model...")
     model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=len(class_indices))
-    model.fit([X1, X2], y, validation_split=0.2, epochs=30, batch_size=32)
+    model.fit([X1_train, X2_train], y_train, validation_data=([X1_val, X2_val], y_val), epochs=60, batch_size=32)
 
     model_path = os.path.join(MODEL_DIR, "combined_model.h5")
     model.save(model_path)
     print(f"Model saved to {model_path}")
 
-# Ver 1.02  
+# Ver 1.03  
 # 修正ルール: プログラム修正時にバージョンを0.01ずつ増加させ、最後にそのバージョンとルールを記述すること。
