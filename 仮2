@@ -88,6 +88,7 @@ def generate_embeddings(dataset_dir, embedding_save_path):
     class_indices = {}
 
     total_files = sum(len(files) for _, _, files in os.walk(dataset_dir))  # 総ファイル数
+    processed_files = 0
 
     for class_idx, class_name in enumerate(sorted(os.listdir(dataset_dir))):
         class_path = os.path.join(dataset_dir, class_name)
@@ -99,7 +100,10 @@ def generate_embeddings(dataset_dir, embedding_save_path):
         class_files = [img_name for img_name in os.listdir(class_path) if img_name.lower().endswith(('jpg', 'jpeg', 'png'))]
         no_face_count = 0  # 顔が検出されなかった画像のカウント
 
-        for idx, img_name in enumerate(tqdm(class_files, desc=f"Class '{class_name}'", leave=True, unit="img")):
+        # クラスごとの処理時間を計測
+        start_time = time.time()
+
+        for idx, img_name in enumerate(class_files, start=1):
             img_path = os.path.join(class_path, img_name)
             embedding, img = extract_face_embeddings(img_path)
             if embedding is not None:
@@ -110,8 +114,17 @@ def generate_embeddings(dataset_dir, embedding_save_path):
             else:
                 no_face_count += 1
                 save_path = os.path.join(NO_FACE_DIR, f"{class_name}_{img_name}")
-                if img is not None:  # imgがNoneでないことを確認
+                if img is not None:
                     cv2.imwrite(save_path, img)
+
+            processed_files += 1
+            progress = (processed_files / total_files) * 100
+            sys.stdout.write(f"\rClass '{class_name}': {idx}/{len(class_files)} images processed | No face: {no_face_count} | Total Progress: {progress:.2f}%")
+            sys.stdout.flush()
+
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"\nClass '{class_name}' completed in {elapsed_time:.2f} seconds | No face detected: {no_face_count}")
 
     np.savez(embedding_save_path, embeddings=np.array(embeddings), labels=np.array(labels))
     print(f"Embeddings and labels saved to {embedding_save_path}")
