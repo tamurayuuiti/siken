@@ -71,9 +71,9 @@ def extract_face_embeddings(image_path):
 
     # ArcFace埋め込みの強化
     if arcface_embedding is not None:
-        arcface_embedding = np.expand_dims(arcface_embedding, axis=0)  # 形状を (1, feature_size) に変換
+        arcface_embedding = np.expand_dims(arcface_embedding, axis=0)  # 1次元→2次元変換
         arcface_embedding = Dense(128, activation='relu')(arcface_embedding)
-        arcface_embedding = tf.squeeze(arcface_embedding)  # 再び1次元に戻す
+        arcface_embedding = tf.squeeze(arcface_embedding)  # 2次元→1次元に戻す
 
     # EfficientNetB0埋め込み
     img_resized = cv2.resize(img, (224, 224))
@@ -166,12 +166,13 @@ if __name__ == "__main__":
     y = data['labels']
 
     print("Building and training combined model...")
-    model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=len(class_indices))
-    model.fit([X1, X2], to_categorical(y), validation_split=0.2, epochs=60, batch_size=32)
+    num_classes = len(np.unique(y))  # 動的にクラス数を取得
+    model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=num_classes)
+    model.fit([X1, X2], to_categorical(y, num_classes=num_classes), validation_split=0.2, epochs=60, batch_size=32)
 
     model_path = os.path.join(MODEL_DIR, "combined_model.h5")
     model.save(model_path)
     print(f"Model saved to {model_path}")
 
-# Ver 1.04  
+# Ver 1.05  
 # 修正ルール: 修正時にバージョンを0.01ずつ増加させ、完全なコードを出力する。
