@@ -157,3 +157,6 @@ if __name__ == "__main__":
     model_path = os.path.join(MODEL_DIR, "combined_model.h5")
     model.save(model_path)
     print(f"Model saved to {model_path}")
+
+# Ver 1.01  
+# 修正ルール: プログラム修正時にバージョンを0.01ずつ増加させ、最後にそのバージョンとルールを記述すること。
