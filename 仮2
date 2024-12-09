@@ -7,7 +7,7 @@ import insightface
 from tqdm import tqdm  # 進捗バーライブラリ
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Sequential, Model
-from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate
+from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate, GlobalAveragePooling2D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import to_categorical
 
@@ -39,8 +39,16 @@ except Exception as e:
     app = insightface.app.FaceAnalysis(name='buffalo_l')
     app.prepare(ctx_id=-1, det_size=(224, 224))  # CPUを使用（ctx_id=-1）
 
-print("Loading EfficientNetB0 model...")
-efficientnet = EfficientNetB0(weights='imagenet', include_top=False, pooling='avg')  # EfficientNetB0モデル
+print("Loading EfficientNetB0 model for fine-tuning...")
+base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+for layer in base_efficientnet.layers[:-20]:  # 最後の20層以外を凍結
+    layer.trainable = False
+
+# EfficientNetB0 出力用の中間層
+x = base_efficientnet.output
+x = GlobalAveragePooling2D()(x)
+x = Dense(256, activation='relu', name="efficientnet_embedding")(x)
+fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=x)
 
 # ---------------------------------------------
 # 顔埋め込みベクトルの抽出
@@ -62,7 +70,7 @@ def extract_face_embeddings(image_path):
     # EfficientNetB0埋め込み
     img_resized = cv2.resize(img, (224, 224))
     img_array = np.expand_dims(img_resized / 255.0, axis=0)
-    efficientnet_embedding = efficientnet.predict(img_array, verbose=0)
+    efficientnet_embedding = fine_tuned_efficientnet.predict(img_array, verbose=0)
 
     return arcface_embedding, efficientnet_embedding, img
 
@@ -158,5 +166,5 @@ if __name__ == "__main__":
     model.save(model_path)
     print(f"Model saved to {model_path}")
 
-# Ver 1.01  
+# Ver 1.02  
 # 修正ルール: プログラム修正時にバージョンを0.01ずつ増加させ、最後にそのバージョンとルールを記述すること。
