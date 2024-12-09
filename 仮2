@@ -154,14 +154,25 @@ if __name__ == "__main__":
     X2 = data['efficientnet_embeddings']
     y = data['labels']
 
+    # クラスラベルの一貫性確認
+    print("Unique labels:", np.unique(y))
+    print("Number of classes:", len(np.unique(y)))
+
+    # データ分割
+    X1_train, X1_val, X2_train, X2_val, y_train, y_val = train_test_split(
+        X1, X2, y, test_size=0.2, random_state=42, shuffle=True
+    )
+
     print("Building and training combined model...")
     num_classes = len(np.unique(y))  # 動的にクラス数を取得
     model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=num_classes)
-    model.fit([X1, X2], to_categorical(y, num_classes=num_classes), validation_split=0.2, epochs=60, batch_size=32)
+    model.fit([X1_train, X2_train], to_categorical(y_train, num_classes=num_classes),
+              validation_data=([X1_val, X2_val], to_categorical(y_val, num_classes=num_classes)),
+              epochs=60, batch_size=32)
 
     model_path = os.path.join(MODEL_DIR, "combined_model.h5")
     model.save(model_path)
     print(f"Model saved to {model_path}")
 
-# Ver 1.06  
-# 修正ルール: ArcFaceをメインモデル、EfficientNetB0を補助モデルに変更し、完全なコードを出力。
+# Ver 1.07  
+# 修正ルール: ラベルの一貫性確認、出力層修正、データ分割の修正を加えた。
