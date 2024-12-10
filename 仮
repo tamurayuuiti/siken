@@ -12,18 +12,17 @@ def confirm_and_reset_output_dir(output_dir):
             response = input(f"Warning: '{output_dir}' already exists and contains data. Do you want to reset it? (yes/no): ").strip().lower()
             if response in ['yes', 'y']:
                 print("Deleting processed_data folder...")
-                shutil.rmtree(output_dir)  # フォルダ削除
-                while os.path.exists(output_dir):  # 完全に削除されたことを確認
+                shutil.rmtree(output_dir)
+                while os.path.exists(output_dir):
                     pass
                 print("Deletion complete. Proceeding with further processing...")
-                os.makedirs(output_dir, exist_ok=True)  # 新たに作成
+                os.makedirs(output_dir, exist_ok=True)
                 break
             elif response in ['no', 'n']:
                 print("Aborting process.")
                 sys.exit(0)
             else:
                 print("Invalid input. Please enter 'yes' or 'no'.")
-
     else:
         os.makedirs(output_dir, exist_ok=True)
 
@@ -99,7 +98,16 @@ def blur_background(image, face_box, target_size):
     blurred_image[max(0, y1):min(y2, image.shape[0]), max(0, x1):min(x2, image.shape[1])] = face
     return cv2.resize(blurred_image, target_size)
 
-def augment_data(input_dir, output_log_dir, target_count=80):
+def add_random_shadow(image):
+    overlay = image.copy()
+    height, width = image.shape[:2]
+    x1, y1 = random.randint(0, width // 2), 0
+    x2, y2 = random.randint(width // 2, width), height
+    cv2.rectangle(overlay, (x1, y1), (x2, y2), (0, 0, 0), -1)
+    alpha = random.uniform(0.3, 0.7)
+    return cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0)
+
+def augment_data(input_dir, output_log_dir, target_count=100):
     os.makedirs(output_log_dir, exist_ok=True)
 
     class_dirs = [d for d in os.listdir(input_dir) if os.path.isdir(os.path.join(input_dir, d)) and d != "~logs"]
@@ -128,29 +136,31 @@ def augment_data(input_dir, output_log_dir, target_count=80):
                 img_path = random.choice(images)
                 img = cv2.imread(img_path)
 
-                # 拡張パラメータをランダム設定
+                # 拡張パラメータ
                 rotation_range = random.choices([(-30, -10), (10, 45)], weights=[0.4, 0.6])[0]
                 rotation = round(random.uniform(*rotation_range), 2)
 
                 shear_range = random.choices([(-0.30, -0.10), (0.10, 0.30)], weights=[0.5, 0.5])[0]
                 shear = round(random.uniform(*shear_range), 2)
 
+                scale = round(random.uniform(0.8, 1.2), 2)
                 flip = random.choices([True, False], weights=[0.35, 0.65])[0]
 
-                # 拡張を手動適用
-                transform_parameters = {
-                    'theta': rotation,             # 回転
-                    'shear': shear,                # シアー
-                    'flip_horizontal': flip        # 左右反転
-                }
+                augmented_img = cv2.resize(img, None, fx=scale, fy=scale)
+                if flip:
+                    augmented_img = cv2.flip(augmented_img, 1)
+                if random.random() < 0.5:
+                    augmented_img = add_random_shadow(augmented_img)
+
                 datagen = ImageDataGenerator()
-                augmented_img = datagen.apply_transform(img, transform_parameters)
+                transform_parameters = {'theta': rotation, 'shear': shear}
+                augmented_img = datagen.apply_transform(augmented_img, transform_parameters)
 
                 save_name = f"aug_{str(count).zfill(3)}_{os.path.basename(img_path)}"
                 save_path = os.path.join(class_path, save_name)
                 cv2.imwrite(save_path, augmented_img)
 
-                log_file.write(f"{save_name:<22} rotation={rotation:>6.2f}, shear={shear:>6.2f}, flip={flip}\n")
+                log_file.write(f"{save_name:<22} rotation={rotation:>6.2f}, shear={shear:>6.2f}, scale={scale:>4.2f}, flip={flip}\n")
 
                 generated += 1
                 count += 1
@@ -170,4 +180,4 @@ if __name__ == "__main__":
 
     confirm_and_reset_output_dir(processed_dir)
     organize_and_resize_with_blurred_background(input_dir, processed_dir, no_face_dir, target_size=(224, 224))
-    augment_data(processed_dir, log_dir, target_count=80)
+    augment_data(processed_dir, log_dir, target_count=100)
