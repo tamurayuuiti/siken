@@ -100,6 +100,10 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
     print(f"{'-'*50}")
 
     # 各顔の認識処理と描画
+    h, w, _ = img.shape  # 画像の解像度を取得
+    font_scale = max(w, h) / 800  # 解像度に基づくフォントスケール
+    thickness = max(1, int(font_scale * 2))  # 枠線の太さ
+
     for face_idx, face in enumerate(faces, start=1):
         arcface_embedding, efficientnet_embedding = extract_embeddings(img, face)
         if arcface_embedding is None or efficientnet_embedding is None:
@@ -123,10 +127,14 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
         x1, y1, x2, y2 = face.bbox.astype(int)
         label = f"{predicted_class} ({confidence:.2f}%)"
         color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
-        cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+        cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
+        # コンソールで各クラスの確率を表示
         print(f"Face {face_idx}: {label}")
+        print("Class probabilities:")
+        for class_name, prob in zip(class_names, predictions[0]):
+            print(f"  {class_name}: {prob * 100:.2f}%")
 
     # 結果画像の保存
     result_image_path = os.path.join(RESULT_IMAGES_DIR, f"result_{img_name}")
