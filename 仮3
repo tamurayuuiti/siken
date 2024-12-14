@@ -13,7 +13,7 @@ import tensorflow as tf
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # 現在のスクリプトのディレクトリ
 TEST_IMAGES_DIR = os.path.join(BASE_DIR, "test_images")  # テスト画像フォルダ
 RESULT_IMAGES_DIR = os.path.join(BASE_DIR, "results_images")  # 結果画像保存フォルダ
-NO_FACE_DIR = os.path.join(BASE_DIR, "no_face_detected")  # 顔が検出できなかった画像保存フォルダ
+NO_FACE_DIR = os.path.join(BASE_DIR, "unnecessary/test_no_face_detected")  # 顔が検出できなかった画像保存フォルダ
 DATASET_DIR = os.path.join(BASE_DIR, "processed_data")  # 学習データフォルダ
 MODEL_DIR = os.path.join(BASE_DIR, "main_model")  # 保存されたモデルフォルダ
 MODEL_PATH = os.path.join(MODEL_DIR, "combined_model.h5")  # 使用するモデルファイル
