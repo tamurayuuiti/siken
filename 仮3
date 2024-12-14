@@ -64,7 +64,7 @@ def extract_embeddings(image, face):
 # ---------------------------------------------
 print("Starting inference on test images...")
 UNKNOWN_THRESHOLD = 80.0
-MIN_FONT_SCALE = 0.5
+MIN_FONT_SCALE = 0.8  # 最低フォントサイズを少し大きく設定
 MAX_FONT_SCALE = 2.0
 
 for img_name in os.listdir(TEST_IMAGES_DIR):
@@ -112,13 +112,17 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
         color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
         cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
 
-        # テキスト位置を調整
+        # テキストサイズと表示位置調整
         text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
         text_x = x1
         text_y = y1 - 10
-        if text_y - text_size[1] < 0:  # 上端超過
-            text_y = y1 + 10 + text_size[1]
-        if text_x + text_size[0] > w:  # 右端超過
+
+        # テキストが上にはみ出る場合は下に描画
+        if text_y - text_size[1] < 0:
+            text_y = y2 + 10 + text_size[1]
+
+        # テキストが右端を超えないように調整
+        if text_x + text_size[0] > w:
             text_x = w - text_size[0]
 
         cv2.putText(img, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
