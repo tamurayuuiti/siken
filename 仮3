@@ -8,17 +8,16 @@ from tensorflow.keras.models import Model
 import tensorflow as tf
 
 # ---------------------------------------------
-# パス設定と初期化（現在のディレクトリを基準とした相対パス）
+# パス設定と初期化
 # ---------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # 現在のスクリプトのディレクトリ
-TEST_IMAGES_DIR = os.path.join(BASE_DIR, "test_images")  # テスト画像フォルダ
-RESULT_IMAGES_DIR = os.path.join(BASE_DIR, "results_images")  # 結果画像保存フォルダ
-NO_FACE_DIR = os.path.join(BASE_DIR, "unnecessary_file/test_no_face_detected")  # 顔が検出できなかった画像保存フォルダ
-DATASET_DIR = os.path.join(BASE_DIR, "processed_data")  # 学習データフォルダ
-MODEL_DIR = os.path.join(BASE_DIR, "main_model")  # 保存されたモデルフォルダ
-MODEL_PATH = os.path.join(MODEL_DIR, "combined_model.h5")  # 使用するモデルファイル
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEST_IMAGES_DIR = os.path.join(BASE_DIR, "test_images")
+RESULT_IMAGES_DIR = os.path.join(BASE_DIR, "results_images")
+NO_FACE_DIR = os.path.join(BASE_DIR, "unnecessary_file/test_no_face_detected")
+DATASET_DIR = os.path.join(BASE_DIR, "processed_data")
+MODEL_DIR = os.path.join(BASE_DIR, "main_model")
+MODEL_PATH = os.path.join(MODEL_DIR, "combined_model.h5")
 
-# 必要なディレクトリを作成
 if not os.path.exists(RESULT_IMAGES_DIR):
     os.makedirs(RESULT_IMAGES_DIR)
 if not os.path.exists(NO_FACE_DIR):
@@ -27,7 +26,7 @@ if not os.path.exists(NO_FACE_DIR):
 # ArcFaceとEfficientNetB0の読み込み
 print("Loading ArcFace model...")
 app = insightface.app.FaceAnalysis(name='buffalo_l')
-app.prepare(ctx_id=-1, det_size=(224, 224))  # CPUを使用
+app.prepare(ctx_id=-1, det_size=(224, 224))
 
 print("Loading EfficientNetB0 model for feature extraction...")
 base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
@@ -35,37 +34,26 @@ x = base_efficientnet.output
 efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
 efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
 
-# モデルの読み込み
 print("Loading trained model...")
 model = load_model(MODEL_PATH)
 
-# 学習時のクラス名をフォルダから取得
 class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
 
 # ---------------------------------------------
 # 画像の前処理関数
 # ---------------------------------------------
 def extract_embeddings(image, face):
-    """
-    1つの顔領域に対してArcFaceとEfficientNetB0の埋め込みベクトルを取得する
-    """
     try:
-        # ArcFace埋め込みベクトル
         arcface_embedding = face.embedding
-
-        # 顔の領域を画像の範囲内にクリップ
         x1, y1, x2, y2 = face.bbox.astype(int)
         h, w, _ = image.shape
         x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
-
-        # EfficientNetB0埋め込みベクトル
         face_img = image[y1:y2, x1:x2]
-        if face_img.size == 0:  # 顔領域が空の場合
+        if face_img.size == 0:
             return None, None
         face_resized = cv2.resize(face_img, (224, 224))
         face_array = np.expand_dims(face_resized / 255.0, axis=0)
         efficientnet_embedding = efficientnet_model.predict(face_array, verbose=0).flatten()
-
         return arcface_embedding, efficientnet_embedding
     except Exception as e:
         print(f"Error during embedding extraction: {e}")
@@ -75,34 +63,32 @@ def extract_embeddings(image, face):
 # 複数画像の推論処理
 # ---------------------------------------------
 print("Starting inference on test images...")
-UNKNOWN_THRESHOLD = 80.0  # 閾値を80%に設定
+UNKNOWN_THRESHOLD = 80.0
+MIN_FONT_SCALE = 0.5
+MAX_FONT_SCALE = 2.0
 
 for img_name in os.listdir(TEST_IMAGES_DIR):
     test_image_path = os.path.join(TEST_IMAGES_DIR, img_name)
-
-    # 画像の読み込み
     img = cv2.imread(test_image_path)
     if img is None:
         print(f"Unable to read image: {test_image_path}")
         continue
 
-    # ArcFaceで顔検出
     faces = app.get(img)
     if len(faces) == 0:
-        # 顔が検出できなかった場合の画像保存
         no_face_path = os.path.join(NO_FACE_DIR, img_name)
         cv2.imwrite(no_face_path, img)
         print(f"Saved no-face image to {no_face_path}")
-        continue  # 処理をスキップ
+        continue
 
     print(f"\n{'='*50}")
     print(f"Results for image: {img_name}")
     print(f"{'-'*50}")
 
-    # 各顔の認識処理と描画
-    h, w, _ = img.shape  # 画像の解像度を取得
-    font_scale = max(w, h) / 800  # 解像度に基づくフォントスケール
-    thickness = max(1, int(font_scale * 2))  # 枠線の太さ
+    h, w, _ = img.shape
+    font_scale = max(w, h) / 800
+    font_scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, font_scale))
+    thickness = max(1, int(font_scale * 2))
 
     for face_idx, face in enumerate(faces, start=1):
         arcface_embedding, efficientnet_embedding = extract_embeddings(img, face)
@@ -113,30 +99,35 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
         embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
         predictions = model.predict(embeddings_input, verbose=0)
 
-        # 予測結果
         predicted_class_index = np.argmax(predictions)
-        confidence = predictions[0][predicted_class_index] * 100  # 確率を%に変換
+        confidence = predictions[0][predicted_class_index] * 100
 
-        # "unknown" 判定
         if confidence < UNKNOWN_THRESHOLD:
             predicted_class = "unknown"
         else:
             predicted_class = class_names[predicted_class_index]
 
-        # 結果の描画
         x1, y1, x2, y2 = face.bbox.astype(int)
         label = f"{predicted_class} ({confidence:.2f}%)"
         color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
         cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
-        cv2.putText(img, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
-        # コンソールで各クラスの確率を表示
+        # テキスト位置を調整
+        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
+        text_x = x1
+        text_y = y1 - 10
+        if text_y - text_size[1] < 0:  # 上端超過
+            text_y = y1 + 10 + text_size[1]
+        if text_x + text_size[0] > w:  # 右端超過
+            text_x = w - text_size[0]
+
+        cv2.putText(img, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+
         print(f"Face {face_idx}: {label}")
         print("Class probabilities:")
         for class_name, prob in zip(class_names, predictions[0]):
             print(f"  {class_name}: {prob * 100:.2f}%")
 
-    # 結果画像の保存
     result_image_path = os.path.join(RESULT_IMAGES_DIR, f"result_{img_name}")
     cv2.imwrite(result_image_path, img)
     print(f"Results saved to: {result_image_path}")
