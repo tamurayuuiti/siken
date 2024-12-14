@@ -6,6 +6,8 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Model
 import tensorflow as tf
+import time  # 認識速度の計測
+from collections import Counter  # 統計情報
 
 # ---------------------------------------------
 # パス設定と初期化（現在のディレクトリを基準とした相対パス）
@@ -14,7 +16,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # 現在のスクリプ�
 TEST_IMAGES_DIR = os.path.join(BASE_DIR, "test_images")  # テスト画像フォルダ
 DATASET_DIR = os.path.join(BASE_DIR, "processed_data")  # 学習データフォルダ
 MODEL_DIR = os.path.join(BASE_DIR, "main_model")  # 保存されたモデルフォルダ
+OUTPUT_IMAGES_DIR = os.path.join(BASE_DIR, "output_images")  # 結果出力フォルダ
 MODEL_PATH = os.path.join(MODEL_DIR, "combined_model.h5")  # 使用するモデルファイル
+
+# 出力ディレクトリの作成
+if not os.path.exists(OUTPUT_IMAGES_DIR):
+    os.makedirs(OUTPUT_IMAGES_DIR)
 
 # ArcFaceとEfficientNetB0の読み込み
 print("Loading ArcFace model...")
@@ -34,36 +41,37 @@ model = load_model(MODEL_PATH)
 # 学習時のクラス名をフォルダから取得
 class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
 
+# 統計情報
+result_counter = Counter()
+
 # ---------------------------------------------
 # 画像の前処理関数
 # ---------------------------------------------
-def extract_embeddings(image_path, target_size=(224, 224)):
+def extract_embeddings(image, target_size=(224, 224)):
     """
     テスト画像からArcFaceとEfficientNetB0の埋め込みベクトルを取得する
     """
     try:
-        # 画像読み込み
-        img = cv2.imread(image_path)
-        if img is None:
-            raise ValueError(f"Image at {image_path} could not be read.")
-
         # ArcFace埋め込みベクトル
-        faces = app.get(img)
-        if len(faces) > 0:
-            arcface_embedding = faces[0].embedding
-        else:
-            print(f"No face detected in {image_path}, using zero-padding for ArcFace.")
-            arcface_embedding = np.zeros(512)  # ArcFaceの埋め込み次元に合わせてゼロ埋め
+        faces = app.get(image)
+        embeddings = []
+        face_locations = []
 
-        # EfficientNetB0埋め込みベクトル
-        img_resized = cv2.resize(img, target_size)
-        img_array = np.expand_dims(img_resized / 255.0, axis=0)  # 正規化と次元追加
-        efficientnet_embedding = efficientnet_model.predict(img_array, verbose=0).flatten()
+        for face in faces:
+            arcface_embedding = face.embedding
+            face_locations.append(face.bbox.astype(int))
 
-        return arcface_embedding, efficientnet_embedding
+            # EfficientNetB0埋め込みベクトル
+            face_img = image[face_locations[-1][1]:face_locations[-1][3], face_locations[-1][0]:face_locations[-1][2]]
+            face_img_resized = cv2.resize(face_img, target_size)
+            face_img_array = np.expand_dims(face_img_resized / 255.0, axis=0)
+            efficientnet_embedding = efficientnet_model.predict(face_img_array, verbose=0).flatten()
+
+            embeddings.append((arcface_embedding, efficientnet_embedding, face_locations[-1]))
+        return embeddings
     except Exception as e:
-        print(f"Error processing image {image_path}: {e}")
-        return np.zeros(512), np.zeros(1280)  # エラー時はゼロ埋めで安全に処理
+        print(f"Error processing image: {e}")
+        return []
 
 # ---------------------------------------------
 # 複数画像の推論処理
@@ -71,35 +79,54 @@ def extract_embeddings(image_path, target_size=(224, 224)):
 print("Starting inference on test images...")
 for img_name in os.listdir(TEST_IMAGES_DIR):
     test_image_path = os.path.join(TEST_IMAGES_DIR, img_name)
+    image = cv2.imread(test_image_path)
 
-    # 画像の前処理と埋め込みベクトル取得
-    arcface_embedding, efficientnet_embedding = extract_embeddings(test_image_path)
+    if image is None:
+        print(f"Error: Unable to load image {test_image_path}")
+        continue
 
-    # モデルの推論
-    embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
-    predictions = model.predict(embeddings_input, verbose=0)
+    start_time = time.time()  # 認識開始時間
+    embeddings = extract_embeddings(image)
 
-    # 結果の表示
-    predicted_class_index = np.argmax(predictions)
-    confidence = predictions[0][predicted_class_index] * 100  # 確率を%に変換
+    for arcface_embedding, efficientnet_embedding, bbox in embeddings:
+        embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
+        predictions = model.predict(embeddings_input, verbose=0)
 
-    # "unknown" 判定
-    UNKNOWN_THRESHOLD = 80.0  # 閾値を80%に設定
-    if confidence < UNKNOWN_THRESHOLD:
-        predicted_class = "unknown"
-    else:
-        predicted_class = class_names[predicted_class_index]
+        # 結果の処理
+        predicted_class_index = np.argmax(predictions)
+        confidence = predictions[0][predicted_class_index] * 100  # 確率を%に変換
 
-    # 画像ごとのクラス確率を表示
-    print(f"\n{'='*50}")
-    print(f"Results for image: {img_name}")
-    print(f"{'-'*50}")
-    print("Class probabilities:")
-    for class_name, prob in zip(class_names, predictions[0]):
-        print(f"{class_name}: {prob * 100:.2f}%")
+        # "unknown" 判定
+        UNKNOWN_THRESHOLD = 80.0
+        if confidence < UNKNOWN_THRESHOLD:
+            predicted_class = "unknown"
+        else:
+            predicted_class = class_names[predicted_class_index]
 
-    # 最終結果の表示（強調）
-    print(f"\n{'*'*20} RECOGNITION RESULT {'*'*20}")
-    print(f"Predicted class: \033[1;32m{predicted_class}\033[0m")  # 強調表示（緑色）
-    print(f"Confidence: \033[1;34m{confidence:.2f}%\033[0m")       # 強調表示（青色）
-    print(f"{'='*50}")
+        # 統計情報更新
+        result_counter[predicted_class] += 1
+
+        # 結果を画像に描画
+        x1, y1, x2, y2 = bbox
+        label = f"{predicted_class} ({confidence:.2f}%)"
+        color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
+        cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(image, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+
+    # 処理時間計測
+    end_time = time.time()
+    processing_time = end_time - start_time
+
+    # 保存先のパス
+    output_path = os.path.join(OUTPUT_IMAGES_DIR, img_name)
+    cv2.imwrite(output_path, image)
+
+    print(f"Processed {img_name} in {processing_time:.2f} seconds. Results saved to {output_path}")
+
+# ---------------------------------------------
+# 統計情報の表示
+# ---------------------------------------------
+print("\nRecognition Summary:")
+for class_name, count in result_counter.items():
+    print(f"{class_name}: {count} images")
+print(f"Total images processed: {sum(result_counter.values())}")
