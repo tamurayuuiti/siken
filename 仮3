@@ -1,0 +1,100 @@
+import os
+import cv2
+import numpy as np
+import insightface
+from tensorflow.keras.models import load_model
+from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.models import Model
+import tensorflow as tf
+
+# ---------------------------------------------
+# パス設定と初期化（現在のディレクトリを基準とした相対パス）
+# ---------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))  # 現在のスクリプトのディレクトリ
+TEST_IMAGES_DIR = os.path.join(BASE_DIR, "test_images")  # テスト画像フォルダ
+DATASET_DIR = os.path.join(BASE_DIR, "processed_data")  # 学習データフォルダ
+MODEL_DIR = os.path.join(BASE_DIR, "main_model")  # 保存されたモデルフォルダ
+MODEL_PATH = os.path.join(MODEL_DIR, "combined_model.h5")  # 使用するモデルファイル
+
+# ArcFaceとEfficientNetB0の読み込み
+print("Loading ArcFace model...")
+app = insightface.app.FaceAnalysis(name='buffalo_l')
+app.prepare(ctx_id=-1, det_size=(224, 224))  # CPUを使用
+
+print("Loading EfficientNetB0 model for feature extraction...")
+base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+x = base_efficientnet.output
+efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
+efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
+
+# モデルの読み込み
+print("Loading trained model...")
+model = load_model(MODEL_PATH)
+
+# 学習時のクラス名をフォルダから取得
+class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
+
+# ---------------------------------------------
+# 画像の前処理関数
+# ---------------------------------------------
+def extract_embeddings(image_path, target_size=(224, 224)):
+    """
+    テスト画像からArcFaceとEfficientNetB0の埋め込みベクトルを取得する
+    """
+    try:
+        # 画像読み込み
+        img = cv2.imread(image_path)
+        if img is None:
+            raise ValueError(f"Image at {image_path} could not be read.")
+
+        # ArcFace埋め込みベクトル
+        faces = app.get(img)
+        if len(faces) > 0:
+            arcface_embedding = faces[0].embedding
+        else:
+            print(f"No face detected in {image_path}, using zero-padding for ArcFace.")
+            arcface_embedding = np.zeros(512)  # ArcFaceの埋め込み次元に合わせてゼロ埋め
+
+        # EfficientNetB0埋め込みベクトル
+        img_resized = cv2.resize(img, target_size)
+        img_array = np.expand_dims(img_resized / 255.0, axis=0)  # 正規化と次元追加
+        efficientnet_embedding = efficientnet_model.predict(img_array, verbose=0).flatten()
+
+        return arcface_embedding, efficientnet_embedding
+    except Exception as e:
+        print(f"Error processing image {image_path}: {e}")
+        return np.zeros(512), np.zeros(1280)  # エラー時はゼロ埋めで安全に処理
+
+# ---------------------------------------------
+# 複数画像の推論処理
+# ---------------------------------------------
+print("Starting inference on test images...")
+for img_name in os.listdir(TEST_IMAGES_DIR):
+    test_image_path = os.path.join(TEST_IMAGES_DIR, img_name)
+
+    # 画像の前処理と埋め込みベクトル取得
+    arcface_embedding, efficientnet_embedding = extract_embeddings(test_image_path)
+
+    # モデルの推論
+    embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
+    predictions = model.predict(embeddings_input, verbose=0)
+
+    # 結果の表示
+    predicted_class_index = np.argmax(predictions)
+    confidence = predictions[0][predicted_class_index] * 100  # 確率を%に変換
+
+    # "unknown" 判定
+    if confidence < 50.0:  # 閾値を50%に設定
+        predicted_class = "unknown"
+    else:
+        predicted_class = class_names[predicted_class_index]
+
+    # 画像ごとのクラス確率を表示
+    print(f"\nResults for image: {img_name}")
+    print("Class probabilities:")
+    for class_name, prob in zip(class_names, predictions[0]):
+        print(f"{class_name}: {prob * 100:.2f}%")
+
+    # 最終結果の表示
+    print(f"Predicted class: {predicted_class}")
+    print(f"Confidence: {confidence:.2f}%")
