@@ -76,20 +76,31 @@ def find_similar_images(hash_dict, threshold=5):
             similar_images.append((img1, img2, distance))
     return similar_images
 
-def remove_similar_images(log_file, similar_images):
+def remove_similar_images(log_file, similar_images, removed_image_dir, class_name):
     """
     重複画像を削除し、削除した情報をログに記録する関数。
+    削除した画像は指定ディレクトリに保存し、名前を変更する。
     """
+    os.makedirs(removed_image_dir, exist_ok=True)
     removed_images = set()
+    count = 1
+
     for img1, img2, distance in similar_images:
         if img2 not in removed_images:
             try:
-                os.remove(img2)  # 重複画像を削除
+                # 新しい名前を生成して画像を移動
+                new_name_1 = f"{class_name}_{str(count).zfill(3)}_1{os.path.splitext(img1)[1]}"
+                new_name_2 = f"{class_name}_{str(count).zfill(3)}_2{os.path.splitext(img2)[1]}"
+                shutil.copy(img1, os.path.join(removed_image_dir, new_name_1))
+                shutil.move(img2, os.path.join(removed_image_dir, new_name_2))
+                
+                # 削除した画像を記録
+                log_file.write(f"{class_name}\t{os.path.basename(img1)}\t{os.path.basename(img2)}\t{distance}\n")
+                print(f"Removed: {img2} -> Saved as {new_name_2} (similar to {img1})")
                 removed_images.add(img2)
-                log_file.write(f"{os.path.basename(img1)}\t{os.path.basename(img2)}\t{distance}\n")
-                print(f"Removed: {img2} (similar to {img1}, distance={distance})")
+                count += 1
             except Exception as e:
-                print(f"Error deleting {img2}: {e}")
+                print(f"Error handling {img2}: {e}")
 
 def process_data(processed_data_dir, log_dir, threshold=5):
     """
@@ -102,8 +113,11 @@ def process_data(processed_data_dir, log_dir, threshold=5):
 
     # ディレクトリ作成
     similarity_log_dir = os.path.join(log_dir, "similarity_log")
-    removal_log_path = os.path.join(log_dir, "removed_similar_images.txt")
+    removed_log_dir = os.path.join(log_dir, "removed_log")
+    removed_image_dir = os.path.join(removed_log_dir, "images")
+    removal_log_path = os.path.join(removed_log_dir, "removed_images_log.txt")
     os.makedirs(similarity_log_dir, exist_ok=True)
+    os.makedirs(removed_log_dir, exist_ok=True)
 
     summary_stats = []
 
@@ -137,7 +151,7 @@ def process_data(processed_data_dir, log_dir, threshold=5):
 
             # 類似画像の検出と削除
             similar_images = find_similar_images(hash_dict, threshold)
-            remove_similar_images(removal_log_file, similar_images)
+            remove_similar_images(removal_log_file, similar_images, removed_image_dir, class_name)
 
             print(f"Finished processing class: {class_name}")
 
