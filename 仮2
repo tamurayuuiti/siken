@@ -155,10 +155,14 @@ def build_combined_model(input_dim1, input_dim2, num_classes):
     """
     input1 = Input(shape=(input_dim1,))
     input2 = Input(shape=(input_dim2,))
-    combined = Concatenate()([input1, input2])
+
+    # 次元を統一するDense層
+    input1_projected = Dense(512, activation='relu', name="input1_projection")(input1)
+    input2_projected = Dense(512, activation='relu', name="input2_projection")(input2)
 
     # Attention Mechanism
-    attention = Attention()([input1, input2])
+    attention = Attention()([input1_projected, input2_projected])
+    combined = Concatenate()([input1_projected, input2_projected])
     combined_with_attention = Concatenate()([combined, attention])
 
     # L2正則化を追加
