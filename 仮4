@@ -1,0 +1,138 @@
+import os
+import cv2
+import numpy as np
+import insightface
+from tensorflow.keras.models import load_model
+from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.models import Model
+import tensorflow as tf
+
+# ---------------------------------------------
+# パス設定と初期化
+# ---------------------------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+TEST_IMAGES_DIR = os.path.join(BASE_DIR, "test_images")
+RESULT_IMAGES_DIR = os.path.join(BASE_DIR, "results_images")
+NO_FACE_DIR = os.path.join(BASE_DIR, "unnecessary_file/test_no_face_detected")
+DATASET_DIR = os.path.join(BASE_DIR, "processed_data")
+MODEL_DIR = os.path.join(BASE_DIR, "main_model")
+MODEL_PATH = os.path.join(MODEL_DIR, "combined_model_saved")  # TensorFlow SavedModel形式のパス
+
+if not os.path.exists(RESULT_IMAGES_DIR):
+    os.makedirs(RESULT_IMAGES_DIR)
+if not os.path.exists(NO_FACE_DIR):
+    os.makedirs(NO_FACE_DIR)
+
+# ArcFaceとEfficientNetB0の読み込み
+print("Loading ArcFace model...")
+app = insightface.app.FaceAnalysis(name='buffalo_l')
+app.prepare(ctx_id=-1, det_size=(224, 224))
+
+print("Loading EfficientNetB0 model for feature extraction...")
+base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+x = base_efficientnet.output
+efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
+efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
+
+print("Loading trained model...")
+model = tf.keras.models.load_model(MODEL_PATH)  # TensorFlow SavedModel形式でロード
+
+class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
+
+# ---------------------------------------------
+# 画像の前処理関数
+# ---------------------------------------------
+def extract_embeddings(image, face):
+    try:
+        arcface_embedding = face.embedding
+        x1, y1, x2, y2 = face.bbox.astype(int)
+        h, w, _ = image.shape
+        x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
+        face_img = image[y1:y2, x1:x2]
+        if face_img.size == 0:
+            return None, None
+        face_resized = cv2.resize(face_img, (224, 224))
+        face_array = np.expand_dims(face_resized / 255.0, axis=0)
+        efficientnet_embedding = efficientnet_model.predict(face_array, verbose=0).flatten()
+        return arcface_embedding, efficientnet_embedding
+    except Exception as e:
+        print(f"Error during embedding extraction: {e}")
+        return None, None
+
+# ---------------------------------------------
+# 複数画像の推論処理
+# ---------------------------------------------
+print("Starting inference on test images...")
+UNKNOWN_THRESHOLD = 80.0
+MIN_FONT_SCALE = 0.8  # 最低フォントサイズを少し大きく設定
+MAX_FONT_SCALE = 3.5
+
+for img_name in os.listdir(TEST_IMAGES_DIR):
+    test_image_path = os.path.join(TEST_IMAGES_DIR, img_name)
+    img = cv2.imread(test_image_path)
+    if img is None:
+        print(f"Unable to read image: {test_image_path}")
+        continue
+
+    faces = app.get(img)
+    if len(faces) == 0:
+        no_face_path = os.path.join(NO_FACE_DIR, img_name)
+        cv2.imwrite(no_face_path, img)
+        print(f"Saved no-face image to {no_face_path}")
+        continue
+
+    print(f"\n{'='*50}")
+    print(f"Results for image: {img_name}")
+    print(f"{'-'*50}")
+
+    h, w, _ = img.shape
+    font_scale = max(w, h) / 1200
+    font_scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, font_scale))
+    thickness = max(1, int(font_scale * 2))
+
+    for face_idx, face in enumerate(faces, start=1):
+        arcface_embedding, efficientnet_embedding = extract_embeddings(img, face)
+        if arcface_embedding is None or efficientnet_embedding is None:
+            print(f"Skipping face {face_idx} due to extraction error.")
+            continue
+
+        embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
+        predictions = model.predict(embeddings_input, verbose=0)
+
+        predicted_class_index = np.argmax(predictions)
+        confidence = predictions[0][predicted_class_index] * 100
+
+        if confidence < UNKNOWN_THRESHOLD:
+            predicted_class = "unknown"
+        else:
+            predicted_class = class_names[predicted_class_index]
+
+        x1, y1, x2, y2 = face.bbox.astype(int)
+        label = f"{predicted_class} ({confidence:.2f}%)"
+        color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+
+        # テキストサイズと表示位置調整
+        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
+        text_x = x1
+        text_y = y1 - 10
+
+        # テキストが上にはみ出る場合は下に描画
+        if text_y - text_size[1] < 0:
+            text_y = y2 + 10 + text_size[1]
+
+        # テキストが右端を超えないように調整
+        if text_x + text_size[0] > w:
+            text_x = w - text_size[0]
+
+        cv2.putText(img, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+
+        print(f"Face {face_idx}: {label}")
+        print("Class probabilities:")
+        for class_name, prob in zip(class_names, predictions[0]):
+            print(f"  {class_name}: {prob * 100:.2f}%")
+
+    result_image_path = os.path.join(RESULT_IMAGES_DIR, f"result_{img_name}")
+    cv2.imwrite(result_image_path, img)
+    print(f"Results saved to: {result_image_path}")
+    print(f"{'='*50}")
