@@ -190,29 +190,25 @@ if __name__ == "__main__":
     X2 = data['efficientnet_embeddings']
     y = data['labels']
 
-    kfold = KFold(n_splits=5, shuffle=True, random_state=42)
-    num_classes = len(np.unique(y))
+    print("Building and training combined model...")
+    model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=len(np.unique(y)))
 
-    for train_idx, val_idx in kfold.split(X1):
-        X1_train, X1_val = X1[train_idx], X1[val_idx]
-        X2_train, X2_val = X2[train_idx], X2[val_idx]
-        y_train, y_val = y[train_idx], y[val_idx]
+    # Early stopping and learning rate scheduler
+    callbacks = [
+        EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
+        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
+    ]
 
-        print("Building and training combined model...")
-        model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=num_classes)
+    class_weights = {i: len(y) / (len(np.unique(y)) * np.sum(y == i)) for i in range(len(np.unique(y)))}
 
-        # Early stopping and learning rate scheduler
-        callbacks = [
-            EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
-            ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
-        ]
+    X1_train, X1_val, X2_train, X2_val, y_train, y_val = train_test_split(
+        X1, X2, y, test_size=0.2, random_state=42
+    )
 
-        class_weights = {i: len(y) / (num_classes * np.sum(y == i)) for i in range(num_classes)}
+    model.fit([X1_train, X2_train], to_categorical(y_train, num_classes=len(np.unique(y))),
+              validation_data=([X1_val, X2_val], to_categorical(y_val, num_classes=len(np.unique(y)))),
+              epochs=100, batch_size=32, callbacks=callbacks, class_weight=class_weights)
 
-        model.fit([X1_train, X2_train], to_categorical(y_train, num_classes=num_classes),
-                  validation_data=([X1_val, X2_val], to_categorical(y_val, num_classes=num_classes)),
-                  epochs=100, batch_size=32, callbacks=callbacks, class_weight=class_weights)
-
-        model_path = os.path.join(MODEL_DIR, "combined_model_saved")
-        model.save(model_path, save_format='tf')  # TensorFlow SavedModel形式で保存
-        print(f"Model saved to {model_path}")
+    model_path = os.path.join(MODEL_DIR, "final_combined_model")
+    model.save(model_path, save_format='tf')  # TensorFlow SavedModel形式で保存
+    print(f"Final model saved to {model_path}")
