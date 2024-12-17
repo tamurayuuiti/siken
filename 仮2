@@ -157,6 +157,13 @@ if __name__ == "__main__":
     embedding_file = os.path.join(EMBEDDING_DIR, "combined_embeddings.npz")
     class_indices = generate_embeddings(DATASET_DIR, embedding_file)
 
+    # 追加: class_indicesをJSONファイルとして保存
+    import json
+    class_indices_path = os.path.join(MODEL_DIR, "class_indices.json")
+    with open(class_indices_path, "w") as f:
+        json.dump(class_indices, f)
+    print(f"Class indices saved to {class_indices_path}")
+
     data = np.load(embedding_file)
     X1 = data['arcface_embeddings']
     X2 = data['efficientnet_embeddings']
