@@ -5,12 +5,13 @@ import cv2
 import numpy as np
 import insightface
 from tqdm import tqdm  # 進捗バーライブラリ
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, KFold
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate
+from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate, Attention, GlobalAveragePooling2D
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import tensorflow as tf  # TensorFlowインポート
 from tensorflow.keras.regularizers import l2  # L2正則化を追加
 
@@ -44,8 +45,15 @@ except Exception as e:
 
 print("Loading EfficientNetB0 model for feature extraction...")
 base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+
+# Fine-Tuning: EfficientNetB0の最後の20層を学習可能に
+for layer in base_efficientnet.layers[:-20]:
+    layer.trainable = False
+for layer in base_efficientnet.layers[-20:]:
+    layer.trainable = True
+
 x = base_efficientnet.output
-efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
+efficientnet_output = GlobalAveragePooling2D()(x)
 fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
 
 # ---------------------------------------------
@@ -66,6 +74,10 @@ def extract_face_embeddings(image_path):
     # ArcFace埋め込み
     faces = app.get(img)
     arcface_embedding = faces[0].embedding if len(faces) > 0 else np.zeros(512)
+
+    # ArcFace埋め込みに学習可能なDense層を追加
+    arcface_dense_layer = Dense(256, activation='relu', name="arcface_dense")(Input(shape=(512,)))
+    arcface_embedding = arcface_dense_layer(arcface_embedding)
 
     # EfficientNetB0埋め込み
     try:
@@ -137,8 +149,12 @@ def build_combined_model(input_dim1, input_dim2, num_classes):
     input2 = Input(shape=(input_dim2,))
     combined = Concatenate()([input1, input2])
 
+    # Attention Mechanism
+    attention = Attention()([input1, input2])
+    combined_with_attention = Concatenate()([combined, attention])
+
     # L2正則化を追加
-    x = Dense(1024, activation='relu', kernel_regularizer=l2(0.01))(combined)
+    x = Dense(1024, activation='relu', kernel_regularizer=l2(0.01))(combined_with_attention)
     x = Dropout(0.5)(x)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = Dropout(0.5)(x)
@@ -162,22 +178,29 @@ if __name__ == "__main__":
     X2 = data['efficientnet_embeddings']
     y = data['labels']
 
-    # データ分割（厳密に設定）
-    X1_train, X1_val, X2_train, X2_val, y_train, y_val = train_test_split(
-        X1, X2, y, test_size=0.2, random_state=42, shuffle=True
-    )
+    kfold = KFold(n_splits=5, shuffle=True, random_state=42)
+    num_classes = len(np.unique(y))
 
-    print("Building and training combined model...")
-    num_classes = len(np.unique(y))  # 動的にクラス数を取得
-    model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=num_classes)
-    model.fit([X1_train, X2_train], to_categorical(y_train, num_classes=num_classes),
-              validation_data=([X1_val, X2_val], to_categorical(y_val, num_classes=num_classes)),
-              epochs=50, batch_size=32)
+    for train_idx, val_idx in kfold.split(X1):
+        X1_train, X1_val = X1[train_idx], X1[val_idx]
+        X2_train, X2_val = X2[train_idx], X2[val_idx]
+        y_train, y_val = y[train_idx], y[val_idx]
 
-    model_path = os.path.join(MODEL_DIR, "combined_model_saved")
-    model.save(model_path, save_format='tf')  # TensorFlow SavedModel形式で保存
-    print(f"Model saved to {model_path}")
+        print("Building and training combined model...")
+        model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=num_classes)
 
-# Ver 1.09  
-# 修正内容: モデルの重みにL2正則化を追加し、過学習を抑制するようにしました。  
-# 修正内容2: モデルをTensorFlow SavedModel形式で保存するように変更しました。
+        # Early stopping and learning rate scheduler
+        callbacks = [
+            EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
+            ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
+        ]
+
+        class_weights = {i: len(y) / (num_classes * np.sum(y == i)) for i in range(num_classes)}
+
+        model.fit([X1_train, X2_train], to_categorical(y_train, num_classes=num_classes),
+                  validation_data=([X1_val, X2_val], to_categorical(y_val, num_classes=num_classes)),
+                  epochs=100, batch_size=32, callbacks=callbacks, class_weight=class_weights)
+
+        model_path = os.path.join(MODEL_DIR, "combined_model_saved")
+        model.save(model_path, save_format='tf')  # TensorFlow SavedModel形式で保存
+        print(f"Model saved to {model_path}")
