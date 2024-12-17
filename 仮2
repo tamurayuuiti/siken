@@ -153,12 +153,12 @@ def build_combined_model(input_dim1, input_dim2, num_classes):
     """
     ArcFaceとEfficientNetB0の埋め込みベクトルを入力とする分類モデルを構築。
     """
-    input1 = Input(shape=(input_dim1,))
-    input2 = Input(shape=(input_dim2,))
+    arcface_input = Input(shape=(input_dim1,), name="arcface_input")
+    arcface_projected = Dense(256, activation='relu', name="arcface_dense")(arcface_input)
 
-    # 次元を統一するDense層
-    input1_projected = Dense(512, activation='relu', name="input1_projection")(input1)
-    input2_projected = Dense(512, activation='relu', name="input2_projection")(input2)
+    efficientnet_input = Input(shape=(input_dim2,), name="efficientnet_input")
+    input1_projected = Dense(512, activation='relu', name="input1_projection")(arcface_projected)
+    input2_projected = Dense(512, activation='relu', name="input2_projection")(efficientnet_input)
 
     # Attention Mechanism
     attention = Attention()([input1_projected, input2_projected])
@@ -172,11 +172,12 @@ def build_combined_model(input_dim1, input_dim2, num_classes):
     x = Dropout(0.5)(x)
     output = Dense(num_classes, activation='softmax')(x)
 
-    model = Model(inputs=[input1, input2], outputs=output)
+    model = Model(inputs=[arcface_input, efficientnet_input], outputs=output)
     model.compile(optimizer=Adam(learning_rate=0.00005),
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
     return model
+
 
 # ---------------------------------------------
 # メイン処理
