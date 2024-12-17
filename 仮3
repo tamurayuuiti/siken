@@ -108,10 +108,10 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
         confidence = predictions[0][predicted_class_index] * 100
 
         if confidence < UNKNOWN_THRESHOLD:
-    predicted_class = "unknown"
-    confidence = 100.0 - confidence  # 補完して直感的な確率にする
-else:
-    predicted_class = class_names[predicted_class_index]
+    　　　　predicted_class = "unknown"
+    　　　　confidence = 100.0 - confidence  # 補完して直感的な確率にする
+　　　　　else:
+    　　　　predicted_class = class_names[predicted_class_index]
 
         x1, y1, x2, y2 = face.bbox.astype(int)
         label = f"{predicted_class} ({confidence:.2f}%)"
