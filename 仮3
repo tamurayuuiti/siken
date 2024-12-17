@@ -5,6 +5,7 @@ import insightface
 from tensorflow.keras.models import load_model
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense, GlobalAveragePooling2D
 import tensorflow as tf
 
 # ---------------------------------------------
@@ -14,7 +15,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_IMAGES_DIR = os.path.join(BASE_DIR, "test_images")
 RESULT_IMAGES_DIR = os.path.join(BASE_DIR, "results_images")
 NO_FACE_DIR = os.path.join(BASE_DIR, "unnecessary_file/test_no_face_detected")
-DATASET_DIR = os.path.join(BASE_DIR, "processed_data")
+DATASET_DIR = os.path.join(BASE_DIR, "test_images")
 MODEL_DIR = os.path.join(BASE_DIR, "main_model")
 MODEL_PATH = os.path.join(MODEL_DIR, "combined_model_saved")  # TensorFlow SavedModel形式のパス
 
@@ -30,9 +31,19 @@ app.prepare(ctx_id=-1, det_size=(224, 224))
 
 print("Loading EfficientNetB0 model for feature extraction...")
 base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+
+# Fine-Tuning: EfficientNetB0の最後の20層を学習可能に
+for layer in base_efficientnet.layers[:-20]:
+    layer.trainable = False
+for layer in base_efficientnet.layers[-20:]:
+    layer.trainable = True
+
 x = base_efficientnet.output
-efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
+efficientnet_output = GlobalAveragePooling2D()(x)
 efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
+
+# ArcFace埋め込み用のDense層定義
+arcface_dense_layer = Dense(256, activation='relu', name="arcface_dense")
 
 print("Loading trained model...")
 model = tf.keras.models.load_model(MODEL_PATH)  # TensorFlow SavedModel形式でロード
@@ -51,9 +62,18 @@ def extract_embeddings(image, face):
         face_img = image[y1:y2, x1:x2]
         if face_img.size == 0:
             return None, None
+        
+        # ArcFace埋め込みにDense層を適用
+        arcface_embedding = arcface_dense_layer(
+            tf.convert_to_tensor(np.expand_dims(arcface_embedding, axis=0))
+        )
+        arcface_embedding = arcface_embedding.numpy().flatten()
+
+        # EfficientNetB0埋め込み
         face_resized = cv2.resize(face_img, (224, 224))
         face_array = np.expand_dims(face_resized / 255.0, axis=0)
         efficientnet_embedding = efficientnet_model.predict(face_array, verbose=0).flatten()
+
         return arcface_embedding, efficientnet_embedding
     except Exception as e:
         print(f"Error during embedding extraction: {e}")
@@ -100,15 +120,12 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
         predictions = model.predict(embeddings_input, verbose=0)
 
         predicted_class_index = np.argmax(predictions)
-        highest_class_confidence = predictions[0][predicted_class_index] * 100
-        unknown_confidence = 100.0 - highest_class_confidence
+        confidence = predictions[0][predicted_class_index] * 100
 
-        if highest_class_confidence < UNKNOWN_THRESHOLD:
+        if confidence < UNKNOWN_THRESHOLD:
             predicted_class = "unknown"
-            confidence = unknown_confidence
         else:
             predicted_class = class_names[predicted_class_index]
-            confidence = highest_class_confidence
 
         x1, y1, x2, y2 = face.bbox.astype(int)
         label = f"{predicted_class} ({confidence:.2f}%)"
