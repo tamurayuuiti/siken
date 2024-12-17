@@ -6,7 +6,6 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Model
 import tensorflow as tf
-from tensorflow.keras.layers import Dense
 
 # ---------------------------------------------
 # パス設定と初期化
@@ -38,9 +37,6 @@ efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_
 print("Loading trained model...")
 model = tf.keras.models.load_model(MODEL_PATH)  # TensorFlow SavedModel形式でロード
 
-# ArcFace Dense層を再定義（学習時と同じ形にする）
-arcface_dense_layer = Dense(256, activation='relu', name="arcface_dense")
-
 class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
 
 # ---------------------------------------------
@@ -48,41 +44,27 @@ class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.pat
 # ---------------------------------------------
 def extract_embeddings(image, face):
     try:
-        # ArcFace埋め込み
         arcface_embedding = face.embedding
-        arcface_embedding = arcface_dense_layer(tf.convert_to_tensor(np.expand_dims(arcface_embedding, axis=0)))
-        arcface_embedding = arcface_embedding.numpy().flatten()
-
-        # EfficientNet埋め込み
         x1, y1, x2, y2 = face.bbox.astype(int)
         h, w, _ = image.shape
         x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
         face_img = image[y1:y2, x1:x2]
         if face_img.size == 0:
             return None, None
-
         face_resized = cv2.resize(face_img, (224, 224))
         face_array = np.expand_dims(face_resized / 255.0, axis=0)
         efficientnet_embedding = efficientnet_model.predict(face_array, verbose=0).flatten()
-
         return arcface_embedding, efficientnet_embedding
     except Exception as e:
         print(f"Error during embedding extraction: {e}")
         return None, None
 
 # ---------------------------------------------
-# クラス名の確認・作成
-# ---------------------------------------------
-class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
-print(f"Loaded class names: {class_names}")
-print(f"Number of classes: {len(class_names)}")
-
-# ---------------------------------------------
 # 複数画像の推論処理
 # ---------------------------------------------
 print("Starting inference on test images...")
 UNKNOWN_THRESHOLD = 80.0
-MIN_FONT_SCALE = 0.8
+MIN_FONT_SCALE = 0.8  # 最低フォントサイズを少し大きく設定
 MAX_FONT_SCALE = 3.5
 
 for img_name in os.listdir(TEST_IMAGES_DIR):
@@ -117,33 +99,29 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
         embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
         predictions = model.predict(embeddings_input, verbose=0)
 
-        # 予測クラスと信頼度
         predicted_class_index = np.argmax(predictions)
         confidence = predictions[0][predicted_class_index] * 100
 
-        # 範囲外インデックスをチェック
-        if predicted_class_index >= len(class_names):
-            print(f"Warning: predicted class index {predicted_class_index} is out of range for class_names.")
-            predicted_class = "unknown"
-        elif confidence < UNKNOWN_THRESHOLD:
+        if confidence < UNKNOWN_THRESHOLD:
             predicted_class = "unknown"
         else:
             predicted_class = class_names[predicted_class_index]
 
-        # 結果表示
         x1, y1, x2, y2 = face.bbox.astype(int)
         label = f"{predicted_class} ({confidence:.2f}%)"
         color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
         cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
 
-        # テキスト表示
+        # テキストサイズと表示位置調整
         text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
         text_x = x1
         text_y = y1 - 10
 
+        # テキストが上にはみ出る場合は下に描画
         if text_y - text_size[1] < 0:
             text_y = y2 + 10 + text_size[1]
 
+        # テキストが右端を超えないように調整
         if text_x + text_size[0] > w:
             text_x = w - text_size[0]
 
