@@ -71,11 +71,18 @@ def extract_embeddings(image, face):
         return None, None
 
 # ---------------------------------------------
+# クラス名の確認・作成
+# ---------------------------------------------
+class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
+print(f"Loaded class names: {class_names}")
+print(f"Number of classes: {len(class_names)}")
+
+# ---------------------------------------------
 # 複数画像の推論処理
 # ---------------------------------------------
 print("Starting inference on test images...")
 UNKNOWN_THRESHOLD = 80.0
-MIN_FONT_SCALE = 0.8  # 最低フォントサイズを少し大きく設定
+MIN_FONT_SCALE = 0.8
 MAX_FONT_SCALE = 3.5
 
 for img_name in os.listdir(TEST_IMAGES_DIR):
@@ -110,29 +117,33 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
         embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
         predictions = model.predict(embeddings_input, verbose=0)
 
+        # 予測クラスと信頼度
         predicted_class_index = np.argmax(predictions)
         confidence = predictions[0][predicted_class_index] * 100
 
-        if confidence < UNKNOWN_THRESHOLD:
+        # 範囲外インデックスをチェック
+        if predicted_class_index >= len(class_names):
+            print(f"Warning: predicted class index {predicted_class_index} is out of range for class_names.")
+            predicted_class = "unknown"
+        elif confidence < UNKNOWN_THRESHOLD:
             predicted_class = "unknown"
         else:
             predicted_class = class_names[predicted_class_index]
 
+        # 結果表示
         x1, y1, x2, y2 = face.bbox.astype(int)
         label = f"{predicted_class} ({confidence:.2f}%)"
         color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
         cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
 
-        # テキストサイズと表示位置調整
+        # テキスト表示
         text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
         text_x = x1
         text_y = y1 - 10
 
-        # テキストが上にはみ出る場合は下に描画
         if text_y - text_size[1] < 0:
             text_y = y2 + 10 + text_size[1]
 
-        # テキストが右端を超えないように調整
         if text_x + text_size[0] > w:
             text_x = w - text_size[0]
 
