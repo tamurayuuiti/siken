@@ -153,10 +153,14 @@ def build_combined_model(input_dim1, input_dim2, num_classes):
     """
     ArcFaceとEfficientNetB0の埋め込みベクトルを入力とする分類モデルを構築。
     """
+    # ArcFaceの入力とDense層適用
     arcface_input = Input(shape=(input_dim1,), name="arcface_input")
     arcface_projected = Dense(256, activation='relu', name="arcface_dense")(arcface_input)
 
+    # EfficientNetの入力
     efficientnet_input = Input(shape=(input_dim2,), name="efficientnet_input")
+
+    # 次元統一のDense層
     input1_projected = Dense(512, activation='relu', name="input1_projection")(arcface_projected)
     input2_projected = Dense(512, activation='relu', name="input2_projection")(efficientnet_input)
 
@@ -177,7 +181,6 @@ def build_combined_model(input_dim1, input_dim2, num_classes):
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
     return model
-
 
 # ---------------------------------------------
 # メイン処理
