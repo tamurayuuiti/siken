@@ -5,13 +5,12 @@ import cv2
 import numpy as np
 import insightface
 from tqdm import tqdm  # 進捗バーライブラリ
-from sklearn.model_selection import train_test_split, KFold
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Model
-from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate, Attention, GlobalAveragePooling2D
+from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.utils import to_categorical
-from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import tensorflow as tf  # TensorFlowインポート
 from tensorflow.keras.regularizers import l2  # L2正則化を追加
 
@@ -45,21 +44,9 @@ except Exception as e:
 
 print("Loading EfficientNetB0 model for feature extraction...")
 base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-
-# Fine-Tuning: EfficientNetB0の最後の20層を学習可能に
-for layer in base_efficientnet.layers[:-20]:
-    layer.trainable = False
-for layer in base_efficientnet.layers[-20:]:
-    layer.trainable = True
-
 x = base_efficientnet.output
-efficientnet_output = GlobalAveragePooling2D()(x)
+efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
 fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
-
-# ---------------------------------------------
-# 学習可能なDense層の事前定義
-# ---------------------------------------------
-arcface_dense_layer = Dense(256, activation='relu', name="arcface_dense")
 
 # ---------------------------------------------
 # 顔埋め込みベクトルの抽出
@@ -79,13 +66,6 @@ def extract_face_embeddings(image_path):
     # ArcFace埋め込み
     faces = app.get(img)
     arcface_embedding = faces[0].embedding if len(faces) > 0 else np.zeros(512)
-
-    # ArcFace埋め込みに学習可能なDense層を追加
-    if np.any(arcface_embedding):  # ゼロ埋めでない場合のみDense層を適用
-        arcface_embedding = arcface_dense_layer(tf.convert_to_tensor(np.expand_dims(arcface_embedding, axis=0)))
-        arcface_embedding = arcface_embedding.numpy().flatten()
-    else:
-        arcface_embedding = np.zeros(256)
 
     # EfficientNetB0埋め込み
     try:
@@ -153,30 +133,18 @@ def build_combined_model(input_dim1, input_dim2, num_classes):
     """
     ArcFaceとEfficientNetB0の埋め込みベクトルを入力とする分類モデルを構築。
     """
-    # ArcFaceの入力とDense層適用
-    arcface_input = Input(shape=(input_dim1,), name="arcface_input")
-    arcface_projected = Dense(256, activation='relu', name="arcface_dense")(arcface_input)
-
-    # EfficientNetの入力
-    efficientnet_input = Input(shape=(input_dim2,), name="efficientnet_input")
-
-    # 次元統一のDense層
-    input1_projected = Dense(512, activation='relu', name="input1_projection")(arcface_projected)
-    input2_projected = Dense(512, activation='relu', name="input2_projection")(efficientnet_input)
-
-    # Attention Mechanism
-    attention = Attention()([input1_projected, input2_projected])
-    combined = Concatenate()([input1_projected, input2_projected])
-    combined_with_attention = Concatenate()([combined, attention])
+    input1 = Input(shape=(input_dim1,))
+    input2 = Input(shape=(input_dim2,))
+    combined = Concatenate()([input1, input2])
 
     # L2正則化を追加
-    x = Dense(1024, activation='relu', kernel_regularizer=l2(0.01))(combined_with_attention)
+    x = Dense(1024, activation='relu', kernel_regularizer=l2(0.01))(combined)
     x = Dropout(0.5)(x)
     x = Dense(512, activation='relu', kernel_regularizer=l2(0.01))(x)
     x = Dropout(0.5)(x)
     output = Dense(num_classes, activation='softmax')(x)
 
-    model = Model(inputs=[arcface_input, efficientnet_input], outputs=output)
+    model = Model(inputs=[input1, input2], outputs=output)
     model.compile(optimizer=Adam(learning_rate=0.00005),
                   loss='categorical_crossentropy',
                   metrics=['accuracy'])
@@ -194,25 +162,22 @@ if __name__ == "__main__":
     X2 = data['efficientnet_embeddings']
     y = data['labels']
 
-    print("Building and training combined model...")
-    model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=len(np.unique(y)))
-
-    # Early stopping and learning rate scheduler
-    callbacks = [
-        EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True),
-        ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6)
-    ]
-
-    class_weights = {i: len(y) / (len(np.unique(y)) * np.sum(y == i)) for i in range(len(np.unique(y)))}
-
+    # データ分割（厳密に設定）
     X1_train, X1_val, X2_train, X2_val, y_train, y_val = train_test_split(
-        X1, X2, y, test_size=0.2, random_state=42
+        X1, X2, y, test_size=0.2, random_state=42, shuffle=True
     )
 
-    model.fit([X1_train, X2_train], to_categorical(y_train, num_classes=len(np.unique(y))),
-              validation_data=([X1_val, X2_val], to_categorical(y_val, num_classes=len(np.unique(y)))),
-              epochs=100, batch_size=32, callbacks=callbacks, class_weight=class_weights)
+    print("Building and training combined model...")
+    num_classes = len(np.unique(y))  # 動的にクラス数を取得
+    model = build_combined_model(input_dim1=X1.shape[1], input_dim2=X2.shape[1], num_classes=num_classes)
+    model.fit([X1_train, X2_train], to_categorical(y_train, num_classes=num_classes),
+              validation_data=([X1_val, X2_val], to_categorical(y_val, num_classes=num_classes)),
+              epochs=100, batch_size=32)
 
     model_path = os.path.join(MODEL_DIR, "combined_model_saved")
     model.save(model_path, save_format='tf')  # TensorFlow SavedModel形式で保存
-    print(f"Final model saved to {model_path}")
+    print(f"Model saved to {model_path}")
+
+# Ver 1.09  
+# 修正内容: モデルの重みにL2正則化を追加し、過学習を抑制するようにしました。  
+# 修正内容2: モデルをTensorFlow SavedModel形式で保存するように変更しました。
