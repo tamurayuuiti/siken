@@ -37,7 +37,12 @@ efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_
 print("Loading trained model...")
 model = tf.keras.models.load_model(MODEL_PATH)  # TensorFlow SavedModel形式でロード
 
-class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
+import json
+class_indices_path = os.path.join(MODEL_DIR, "class_indices.json")
+with open(class_indices_path, "r") as f:
+    class_indices = json.load(f)
+class_names = [class_indices[str(i)] for i in range(len(class_indices))]
+print(f"Loaded class names: {class_names}")
 
 # ---------------------------------------------
 # 画像の前処理関数
