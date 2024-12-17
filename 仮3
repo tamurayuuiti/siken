@@ -108,7 +108,9 @@ for img_name in os.listdir(TEST_IMAGES_DIR):
         confidence = predictions[0][predicted_class_index] * 100
 
         if confidence < UNKNOWN_THRESHOLD:
-            predicted_class = "unknown"
+    predicted_class = "unknown"
+    confidence = 100.0 - confidence
+
         else:
             predicted_class = class_names[predicted_class_index]
 
