@@ -60,6 +60,13 @@ def extract_embeddings(image, face):
         return None, None
 
 # ---------------------------------------------
+# クラス名の確認・作成
+# ---------------------------------------------
+class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
+print(f"Loaded class names: {class_names}")
+print(f"Number of classes: {len(class_names)}")
+
+# ---------------------------------------------
 # 複数画像の推論処理
 # ---------------------------------------------
 print("Starting inference on test images...")
