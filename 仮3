@@ -38,12 +38,6 @@ efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_
 print("Loading trained model...")
 model = tf.keras.models.load_model(MODEL_PATH)  # TensorFlow SavedModel形式でロード
 
-# 学習済みDense層の重みを取得
-print("Extracting ArcFace Dense layer weights...")
-arcface_dense_layer = Dense(256, activation='relu', name="arcface_dense")
-arcface_dense_layer_weights = model.get_layer("arcface_dense").get_weights()
-arcface_dense_layer.set_weights(arcface_dense_layer_weights)
-
 class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.path.join(DATASET_DIR, d))])
 
 # ---------------------------------------------
@@ -51,24 +45,25 @@ class_names = sorted([d for d in os.listdir(DATASET_DIR) if os.path.isdir(os.pat
 # ---------------------------------------------
 def extract_embeddings(image, face):
     try:
-        # ArcFace埋め込みにDense層を適用（学習用プログラムと合わせる）
+        # ArcFace埋め込み
         arcface_embedding = face.embedding
-        arcface_embedding = arcface_dense_layer(tf.convert_to_tensor(np.expand_dims(arcface_embedding, axis=0)))
-        arcface_embedding = arcface_embedding.numpy().flatten()
-
         x1, y1, x2, y2 = face.bbox.astype(int)
         h, w, _ = image.shape
         x1, y1, x2, y2 = max(0, x1), max(0, y1), min(w, x2), min(h, y2)
         face_img = image[y1:y2, x1:x2]
         if face_img.size == 0:
             return None, None
+
+        # EfficientNet埋め込み
         face_resized = cv2.resize(face_img, (224, 224))
         face_array = np.expand_dims(face_resized / 255.0, axis=0)
         efficientnet_embedding = efficientnet_model.predict(face_array, verbose=0).flatten()
+
         return arcface_embedding, efficientnet_embedding
     except Exception as e:
         print(f"Error during embedding extraction: {e}")
         return None, None
+
 
 # ---------------------------------------------
 # 複数画像の推論処理
