@@ -209,6 +209,6 @@ if __name__ == "__main__":
               validation_data=([X1_val, X2_val], to_categorical(y_val, num_classes=len(np.unique(y)))),
               epochs=100, batch_size=32, callbacks=callbacks, class_weight=class_weights)
 
-    model_path = os.path.join(MODEL_DIR, "final_combined_model")
+    model_path = os.path.join(MODEL_DIR, "combined_model_saved")
     model.save(model_path, save_format='tf')  # TensorFlow SavedModel形式で保存
     print(f"Final model saved to {model_path}")
