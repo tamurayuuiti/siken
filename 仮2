@@ -57,6 +57,11 @@ efficientnet_output = GlobalAveragePooling2D()(x)
 fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
 
 # ---------------------------------------------
+# 学習可能なDense層の事前定義
+# ---------------------------------------------
+arcface_dense_layer = Dense(256, activation='relu', name="arcface_dense")
+
+# ---------------------------------------------
 # 顔埋め込みベクトルの抽出
 # ---------------------------------------------
 def extract_face_embeddings(image_path):
@@ -76,8 +81,11 @@ def extract_face_embeddings(image_path):
     arcface_embedding = faces[0].embedding if len(faces) > 0 else np.zeros(512)
 
     # ArcFace埋め込みに学習可能なDense層を追加
-    arcface_dense_layer = Dense(256, activation='relu', name="arcface_dense")(Input(shape=(512,)))
-    arcface_embedding = arcface_dense_layer(arcface_embedding)
+    if np.any(arcface_embedding):  # ゼロ埋めでない場合のみDense層を適用
+        arcface_embedding = arcface_dense_layer(tf.convert_to_tensor(np.expand_dims(arcface_embedding, axis=0)))
+        arcface_embedding = arcface_embedding.numpy().flatten()
+    else:
+        arcface_embedding = np.zeros(256)
 
     # EfficientNetB0埋め込み
     try:
