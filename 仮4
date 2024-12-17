@@ -6,22 +6,23 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Model
 import tensorflow as tf
+import time  # 処理時間計測用
 
 # ---------------------------------------------
 # パス設定と初期化
 # ---------------------------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-TEST_IMAGES_DIR = os.path.join(BASE_DIR, "test_images")
-RESULT_IMAGES_DIR = os.path.join(BASE_DIR, "results_images")
-NO_FACE_DIR = os.path.join(BASE_DIR, "unnecessary_file/test_no_face_detected")
+TEST_VIDEOS_DIR = os.path.join(BASE_DIR, "test_videos")
+RESULT_VIDEOS_DIR = os.path.join(BASE_DIR, "results_videos")
+NO_FACE_VIDEOS_DIR = os.path.join(BASE_DIR, "unnecessary_file/test_no_face_detected")
 DATASET_DIR = os.path.join(BASE_DIR, "processed_data")
 MODEL_DIR = os.path.join(BASE_DIR, "main_model")
 MODEL_PATH = os.path.join(MODEL_DIR, "combined_model_saved")  # TensorFlow SavedModel形式のパス
 
-if not os.path.exists(RESULT_IMAGES_DIR):
-    os.makedirs(RESULT_IMAGES_DIR)
-if not os.path.exists(NO_FACE_DIR):
-    os.makedirs(NO_FACE_DIR)
+if not os.path.exists(RESULT_VIDEOS_DIR):
+    os.makedirs(RESULT_VIDEOS_DIR)
+if not os.path.exists(NO_FACE_VIDEOS_DIR):
+    os.makedirs(NO_FACE_VIDEOS_DIR)
 
 # ArcFaceとEfficientNetB0の読み込み
 print("Loading ArcFace model...")
@@ -60,79 +61,82 @@ def extract_embeddings(image, face):
         return None, None
 
 # ---------------------------------------------
-# 複数画像の推論処理
+# 動画の推論処理
 # ---------------------------------------------
-print("Starting inference on test images...")
+print("Starting inference on test videos...")
 UNKNOWN_THRESHOLD = 80.0
-MIN_FONT_SCALE = 0.8  # 最低フォントサイズを少し大きく設定
+MIN_FONT_SCALE = 0.8
 MAX_FONT_SCALE = 3.5
 
-for img_name in os.listdir(TEST_IMAGES_DIR):
-    test_image_path = os.path.join(TEST_IMAGES_DIR, img_name)
-    img = cv2.imread(test_image_path)
-    if img is None:
-        print(f"Unable to read image: {test_image_path}")
+for video_name in os.listdir(TEST_VIDEOS_DIR):
+    test_video_path = os.path.join(TEST_VIDEOS_DIR, video_name)
+    cap = cv2.VideoCapture(test_video_path)
+    if not cap.isOpened():
+        print(f"Unable to open video: {test_video_path}")
         continue
 
-    faces = app.get(img)
-    if len(faces) == 0:
-        no_face_path = os.path.join(NO_FACE_DIR, img_name)
-        cv2.imwrite(no_face_path, img)
-        print(f"Saved no-face image to {no_face_path}")
-        continue
+    # 結果動画の保存先
+    result_video_path = os.path.join(RESULT_VIDEOS_DIR, f"result_{video_name}")
+    fourcc = cv2.VideoWriter_fourcc(*'XVID')
+    fps = int(cap.get(cv2.CAP_PROP_FPS))
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))  # 総フレーム数
+    out = cv2.VideoWriter(result_video_path, fourcc, fps, (frame_width, frame_height))
 
-    print(f"\n{'='*50}")
-    print(f"Results for image: {img_name}")
-    print(f"{'-'*50}")
+    no_face_detected = True
+    frame_idx = 0
+    start_time = time.time()  # 処理開始時間を記録
 
-    h, w, _ = img.shape
-    font_scale = max(w, h) / 1200
-    font_scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, font_scale))
-    thickness = max(1, int(font_scale * 2))
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    for face_idx, face in enumerate(faces, start=1):
-        arcface_embedding, efficientnet_embedding = extract_embeddings(img, face)
-        if arcface_embedding is None or efficientnet_embedding is None:
-            print(f"Skipping face {face_idx} due to extraction error.")
-            continue
+        faces = app.get(frame)
+        if len(faces) > 0:
+            no_face_detected = False
 
-        embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
-        predictions = model.predict(embeddings_input, verbose=0)
+        for face_idx, face in enumerate(faces, start=1):
+            arcface_embedding, efficientnet_embedding = extract_embeddings(frame, face)
+            if arcface_embedding is None or efficientnet_embedding is None:
+                continue
 
-        predicted_class_index = np.argmax(predictions)
-        confidence = predictions[0][predicted_class_index] * 100
+            embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
+            predictions = model.predict(embeddings_input, verbose=0)
 
-        if confidence < UNKNOWN_THRESHOLD:
-            predicted_class = "unknown"
-        else:
-            predicted_class = class_names[predicted_class_index]
+            predicted_class_index = np.argmax(predictions)
+            confidence = predictions[0][predicted_class_index] * 100
 
-        x1, y1, x2, y2 = face.bbox.astype(int)
-        label = f"{predicted_class} ({confidence:.2f}%)"
-        color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
-        cv2.rectangle(img, (x1, y1), (x2, y2), color, thickness)
+            if confidence < UNKNOWN_THRESHOLD:
+                predicted_class = "unknown"
+            else:
+                predicted_class = class_names[predicted_class_index]
 
-        # テキストサイズと表示位置調整
-        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)[0]
-        text_x = x1
-        text_y = y1 - 10
+            x1, y1, x2, y2 = face.bbox.astype(int)
+            label = f"{predicted_class} ({confidence:.2f}%)"
+            color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
+            font_scale = max(frame_width, frame_height) / 1200
+            font_scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, font_scale))
+            thickness = max(1, int(font_scale * 2))
 
-        # テキストが上にはみ出る場合は下に描画
-        if text_y - text_size[1] < 0:
-            text_y = y2 + 10 + text_size[1]
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+            cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
-        # テキストが右端を超えないように調整
-        if text_x + text_size[0] > w:
-            text_x = w - text_size[0]
+        out.write(frame)  # 結果フレームを保存
+        frame_idx += 1
 
-        cv2.putText(img, label, (text_x, text_y), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+        # 進捗状況をリアルタイムで表示
+        elapsed_time = time.time() - start_time
+        progress = (frame_idx / total_frames) * 100
+        print(f"Processing {video_name}: {frame_idx}/{total_frames} frames ({progress:.2f}%) - Elapsed Time: {elapsed_time:.2f}s", end="\r")
 
-        print(f"Face {face_idx}: {label}")
-        print("Class probabilities:")
-        for class_name, prob in zip(class_names, predictions[0]):
-            print(f"  {class_name}: {prob * 100:.2f}%")
+    cap.release()
+    out.release()
 
-    result_image_path = os.path.join(RESULT_IMAGES_DIR, f"result_{img_name}")
-    cv2.imwrite(result_image_path, img)
-    print(f"Results saved to: {result_image_path}")
-    print(f"{'='*50}")
+    if no_face_detected:
+        no_face_video_path = os.path.join(NO_FACE_VIDEOS_DIR, video_name)
+        shutil.move(test_video_path, no_face_video_path)
+        print(f"\nNo faces detected. Moved video to: {no_face_video_path}")
+    else:
+        print(f"\nResults saved to: {result_video_path}")
