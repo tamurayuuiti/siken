@@ -113,10 +113,8 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
             predicted_class_index = np.argmax(predictions)
             confidence = predictions[0][predicted_class_index] * 100
 
-            # 修正: unknownの場合の確率を「100% - 一番高いクラスの確率」に設定
             if confidence < UNKNOWN_THRESHOLD:
                 predicted_class = "unknown"
-                confidence = 100.0 - confidence  # 100%から最も高いクラスの確率を引く
             else:
                 predicted_class = class_names[predicted_class_index]
 
