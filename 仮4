@@ -6,7 +6,10 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.applications import EfficientNetB0
 from tensorflow.keras.models import Model
 import tensorflow as tf
-import time  # 処理時間計測用
+import time
+import datetime
+import json
+import shutil
 
 # ---------------------------------------------
 # パス設定と初期化
@@ -38,7 +41,6 @@ efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_
 print("Loading trained model...")
 model = tf.keras.models.load_model(MODEL_PATH)  # TensorFlow SavedModel形式でロード
 
-import json
 class_indices_path = os.path.join(MODEL_DIR, "class_indices.json")
 with open(class_indices_path, "r") as f:
     class_indices = json.load(f)
@@ -98,6 +100,7 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
         if not ret:
             break
 
+        # フレーム単位の処理
         faces = app.get(frame)
         if len(faces) > 0:
             no_face_detected = False
@@ -131,10 +134,23 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
         out.write(frame)  # 結果フレームを保存
         frame_idx += 1
 
-        # 進捗状況をリアルタイムで表示
+        # 進捗と残り時間の計算
         elapsed_time = time.time() - start_time
-        progress = (frame_idx / total_frames) * 100
-        print(f"Processing {video_name}: {frame_idx}/{total_frames} frames ({progress:.2f}%) - Elapsed Time: {elapsed_time:.2f}s", end="\r")
+        progress = frame_idx / total_frames  # 進捗率
+        if progress > 0:
+            total_estimated_time = elapsed_time / progress
+            remaining_time = total_estimated_time - elapsed_time
+        else:
+            remaining_time = 0  # 初期状態で進捗がない場合
+
+        # 残り時間を hh:mm:ss フォーマットに変換
+        remaining_time_str = str(datetime.timedelta(seconds=int(remaining_time)))
+
+        # コンソールに進捗と残り時間を表示
+        print(f"Processing {video_name}: {frame_idx}/{total_frames} frames "
+              f"({progress * 100:.2f}%) - "
+              f"Elapsed Time: {elapsed_time:.2f}s - "
+              f"Remaining Time: {remaining_time_str}", end="\r")
 
     cap.release()
     out.release()
