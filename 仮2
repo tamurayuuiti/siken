@@ -6,7 +6,7 @@ import numpy as np
 import insightface
 from tqdm import tqdm  # 進捗バーライブラリ
 from sklearn.model_selection import train_test_split
-from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications import EfficientNetV2S
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Dense, Dropout, Input, Concatenate
 from tensorflow.keras.optimizers import Adam
@@ -31,7 +31,7 @@ if not os.path.exists(NO_FACE_DIR):
     os.makedirs(NO_FACE_DIR)
 
 # ---------------------------------------------
-# ArcFaceモデルとEfficientNetB0の準備
+# ArcFaceモデルとEfficientNetV2の準備
 # ---------------------------------------------
 print("Loading ArcFace model...")
 try:
@@ -42,8 +42,8 @@ except Exception as e:
     app = insightface.app.FaceAnalysis(name='buffalo_l')
     app.prepare(ctx_id=-1, det_size=(224, 224))  # CPUを使用（ctx_id=-1）
 
-print("Loading EfficientNetB0 model for feature extraction...")
-base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+print("Loading EfficientNetV2 model for feature extraction...")
+base_efficientnet = EfficientNetV2S(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 x = base_efficientnet.output
 efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
 fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
@@ -53,28 +53,29 @@ fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=efficien
 # ---------------------------------------------
 def extract_face_embeddings(image_path):
     """
-    ArcFaceとEfficientNetB0を使用して画像から埋め込みベクトルを取得する。
+    ArcFaceとEfficientNetV2を使用して画像から埋め込みベクトルを取得する。
     エラー時にはゼロ埋めで安全に処理する。
     :param image_path: 画像のパス
-    :return: (ArcFace埋め込みベクトル, EfficientNetB0埋め込みベクトル)
+    :return: (ArcFace埋め込みベクトル, EfficientNetV2埋め込みベクトル)
     """
     img = cv2.imread(image_path)
     if img is None:
         print(f"Warning: Unable to load image {image_path}")
-        return np.zeros(512), np.zeros(1280), None  # ArcFaceとEfficientNetB0の埋め込み次元に合わせてゼロ埋め
+        return np.zeros(512), np.zeros(512), None  # ArcFaceとEfficientNetV2の次元を統一（512次元）
 
     # ArcFace埋め込み
     faces = app.get(img)
     arcface_embedding = faces[0].embedding if len(faces) > 0 else np.zeros(512)
 
-    # EfficientNetB0埋め込み
+    # EfficientNetV2埋め込み
     try:
         img_resized = cv2.resize(img, (224, 224))
         img_array = np.expand_dims(img_resized / 255.0, axis=0)
         efficientnet_embedding = fine_tuned_efficientnet.predict(img_array, verbose=0)
+        efficientnet_embedding = Dense(512, activation='relu')(efficientnet_embedding)  # 次元を512に変換
     except Exception as e:
-        print(f"Warning: EfficientNetB0 embedding failed for {image_path}")
-        efficientnet_embedding = np.zeros(1280)
+        print(f"Warning: EfficientNetV2 embedding failed for {image_path}")
+        efficientnet_embedding = np.zeros(512)
 
     return arcface_embedding, efficientnet_embedding.flatten(), img
 
@@ -83,7 +84,7 @@ def extract_face_embeddings(image_path):
 # ---------------------------------------------
 def generate_embeddings(dataset_dir, embedding_save_path):
     """
-    データセットの各画像からArcFaceとEfficientNetB0の埋め込みベクトルを生成し保存する。
+    データセットの各画像からArcFaceとEfficientNetV2の埋め込みベクトルを生成し保存する。
     """
     arcface_embeddings = []
     efficientnet_embeddings = []
@@ -131,11 +132,16 @@ def generate_embeddings(dataset_dir, embedding_save_path):
 # ---------------------------------------------
 def build_combined_model(input_dim1, input_dim2, num_classes):
     """
-    ArcFaceとEfficientNetB0の埋め込みベクトルを入力とする分類モデルを構築。
+    ArcFaceとEfficientNetV2の埋め込みベクトルを入力とする分類モデルを構築。
     """
     input1 = Input(shape=(input_dim1,))
     input2 = Input(shape=(input_dim2,))
-    combined = Concatenate()([input1, input2])
+    
+    # 次元の統一
+    input1_dense = Dense(512, activation='relu')(input1)
+    input2_dense = Dense(512, activation='relu')(input2)
+
+    combined = Concatenate()([input1_dense, input2_dense])
 
     # L2正則化を追加
     x = Dense(1024, activation='relu', kernel_regularizer=l2(0.01))(combined)
@@ -184,7 +190,3 @@ if __name__ == "__main__":
     model_path = os.path.join(MODEL_DIR, "combined_model_saved")
     model.save(model_path, save_format='tf')  # TensorFlow SavedModel形式で保存
     print(f"Model saved to {model_path}")
-
-# Ver 1.09  
-# 修正内容: モデルの重みにL2正則化を追加し、過学習を抑制するようにしました。  
-# 修正内容2: モデルをTensorFlow SavedModel形式で保存するように変更しました。
