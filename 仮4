@@ -11,6 +11,7 @@ import time
 import datetime
 import json
 import shutil
+import gc  # ガベージコレクション用
 
 # ---------------------------------------------
 # パス設定と初期化
@@ -137,6 +138,11 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
             cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
         out.write(frame)  # 結果フレームを保存
+
+        # フレームの削除
+        del frame  # メモリ解放
+        gc.collect()  # ガベージコレクションを実行
+
         frame_idx += 1
 
         # 進捗と残り時間の計算
@@ -166,3 +172,6 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
         print(f"\nNo faces detected. Moved video to: {no_face_video_path}")
     else:
         print(f"\nResults saved to: {result_video_path}")
+
+    # ガベージコレクションを実行
+    gc.collect()
