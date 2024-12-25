@@ -3,9 +3,10 @@ import cv2
 import numpy as np
 import insightface
 from tensorflow.keras.models import load_model
-from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications import EfficientNetV2S
 from tensorflow.keras.models import Model
 import tensorflow as tf
+from tensorflow.keras.layers import Dense
 
 # ---------------------------------------------
 # パス設定と初期化
@@ -23,20 +24,22 @@ if not os.path.exists(RESULT_IMAGES_DIR):
 if not os.path.exists(NO_FACE_DIR):
     os.makedirs(NO_FACE_DIR)
 
-# ArcFaceとEfficientNetB0の読み込み
+# ArcFaceとEfficientNetV2の読み込み
 print("Loading ArcFace model...")
 app = insightface.app.FaceAnalysis(name='buffalo_l')
 app.prepare(ctx_id=-1, det_size=(224, 224))
 
-print("Loading EfficientNetB0 model for feature extraction...")
-base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+print("Loading EfficientNetV2 model for feature extraction...")
+base_efficientnet = EfficientNetV2S(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 x = base_efficientnet.output
 efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
+efficientnet_output = Dense(512, activation='relu')(efficientnet_output)  # 次元を512に統一
 efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
 
 print("Loading trained model...")
 model = tf.keras.models.load_model(MODEL_PATH)  # TensorFlow SavedModel形式でロード
 
+# クラス名の読み込み
 import json
 class_indices_path = os.path.join(MODEL_DIR, "class_indices.json")
 with open(class_indices_path, "r") as f:
@@ -48,6 +51,9 @@ print(f"Loaded class names: {class_names}")
 # 画像の前処理関数
 # ---------------------------------------------
 def extract_embeddings(image, face):
+    """
+    顔領域からArcFaceとEfficientNetV2の埋め込みベクトルを取得
+    """
     try:
         arcface_embedding = face.embedding
         x1, y1, x2, y2 = face.bbox.astype(int)
@@ -69,7 +75,7 @@ def extract_embeddings(image, face):
 # ---------------------------------------------
 print("Starting inference on test images...")
 UNKNOWN_THRESHOLD = 80.0
-MIN_FONT_SCALE = 0.8  # 最低フォントサイズを少し大きく設定
+MIN_FONT_SCALE = 0.8
 MAX_FONT_SCALE = 3.5
 
 for img_name in os.listdir(TEST_IMAGES_DIR):
