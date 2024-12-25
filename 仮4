@@ -3,8 +3,9 @@ import cv2
 import numpy as np
 import insightface
 from tensorflow.keras.models import load_model
-from tensorflow.keras.applications import EfficientNetB0
+from tensorflow.keras.applications import EfficientNetV2S
 from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Dense
 import tensorflow as tf
 import time
 import datetime
@@ -27,15 +28,16 @@ if not os.path.exists(RESULT_VIDEOS_DIR):
 if not os.path.exists(NO_FACE_VIDEOS_DIR):
     os.makedirs(NO_FACE_VIDEOS_DIR)
 
-# ArcFaceとEfficientNetB0の読み込み
+# ArcFaceとEfficientNetV2の読み込み
 print("Loading ArcFace model...")
 app = insightface.app.FaceAnalysis(name='buffalo_l')
 app.prepare(ctx_id=-1, det_size=(224, 224))
 
-print("Loading EfficientNetB0 model for feature extraction...")
-base_efficientnet = EfficientNetB0(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+print("Loading EfficientNetV2 model for feature extraction...")
+base_efficientnet = EfficientNetV2S(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
 x = base_efficientnet.output
 efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
+efficientnet_output = Dense(512, activation='relu')(efficientnet_output)  # 次元を512に統一
 efficientnet_model = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
 
 print("Loading trained model...")
@@ -51,6 +53,9 @@ print(f"Loaded class names: {class_names}")
 # 画像の前処理関数
 # ---------------------------------------------
 def extract_embeddings(image, face):
+    """
+    顔領域からArcFaceとEfficientNetV2の埋め込みベクトルを取得
+    """
     try:
         arcface_embedding = face.embedding
         x1, y1, x2, y2 = face.bbox.astype(int)
@@ -101,37 +106,41 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
             break
 
         # フレーム単位の処理
-        faces = app.get(frame)
-        if len(faces) > 0:
-            no_face_detected = False
+        try:
+            faces = app.get(frame)
+            if len(faces) > 0:
+                no_face_detected = False
 
-        for face_idx, face in enumerate(faces, start=1):
-            arcface_embedding, efficientnet_embedding = extract_embeddings(frame, face)
-            if arcface_embedding is None or efficientnet_embedding is None:
-                continue
+            for face_idx, face in enumerate(faces, start=1):
+                arcface_embedding, efficientnet_embedding = extract_embeddings(frame, face)
+                if arcface_embedding is None or efficientnet_embedding is None:
+                    continue
 
-            embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
-            predictions = model.predict(embeddings_input, verbose=0)
+                embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
+                predictions = model.predict(embeddings_input, verbose=0)
 
-            predicted_class_index = np.argmax(predictions)
-            confidence = predictions[0][predicted_class_index] * 100
+                predicted_class_index = np.argmax(predictions)
+                confidence = predictions[0][predicted_class_index] * 100
 
-            if confidence < UNKNOWN_THRESHOLD:
-                predicted_class = "unknown"
-            else:
-                predicted_class = class_names[predicted_class_index]
+                if confidence < UNKNOWN_THRESHOLD:
+                    predicted_class = "unknown"
+                else:
+                    predicted_class = class_names[predicted_class_index]
 
-            x1, y1, x2, y2 = face.bbox.astype(int)
-            label = f"{predicted_class} ({confidence:.2f}%)"
-            color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
-            font_scale = max(frame_width, frame_height) / 1200
-            font_scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, font_scale))
-            thickness = max(1, int(font_scale * 2))
+                x1, y1, x2, y2 = face.bbox.astype(int)
+                label = f"{predicted_class} ({confidence:.2f}%)"
+                color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
+                font_scale = max(frame_width, frame_height) / 1200
+                font_scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, font_scale))
+                thickness = max(1, int(font_scale * 2))
 
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
-            cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
-        out.write(frame)  # 結果フレームを保存
+            out.write(frame)  # 結果フレームを保存
+        except Exception as e:
+            print(f"Error processing frame {frame_idx} of {video_name}: {e}")
+
         frame_idx += 1
 
         # 進捗と残り時間の計算
