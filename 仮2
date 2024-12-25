@@ -31,6 +31,14 @@ if not os.path.exists(NO_FACE_DIR):
     os.makedirs(NO_FACE_DIR)
 
 # ---------------------------------------------
+# 環境変数の設定（Kerasキャッシュディレクトリとアップデート通知無効化）
+# ---------------------------------------------
+# Kerasのキャッシュディレクトリを変更（十分な容量のディレクトリに変更）
+os.environ["KERAS_HOME"] = "F:/keras_cache"  # 必要に応じて変更
+# Albumentationsのアップデート通知を無効化
+os.environ["NO_ALBUMENTATIONS_UPDATE"] = "1"
+
+# ---------------------------------------------
 # ArcFaceモデルとEfficientNetV2の準備
 # ---------------------------------------------
 print("Loading ArcFace model...")
@@ -43,10 +51,14 @@ except Exception as e:
     app.prepare(ctx_id=-1, det_size=(224, 224))  # CPUを使用（ctx_id=-1）
 
 print("Loading EfficientNetV2 model for feature extraction...")
-base_efficientnet = EfficientNetV2S(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
-x = base_efficientnet.output
-efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
-fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
+try:
+    base_efficientnet = EfficientNetV2S(weights='imagenet', include_top=False, input_shape=(224, 224, 3))
+    x = base_efficientnet.output
+    efficientnet_output = tf.keras.layers.GlobalAveragePooling2D()(x)
+    fine_tuned_efficientnet = Model(inputs=base_efficientnet.input, outputs=efficientnet_output)
+except OSError as e:
+    print("Error downloading EfficientNetV2 weights. Please ensure sufficient disk space or manually download weights.")
+    raise
 
 # ---------------------------------------------
 # 顔埋め込みベクトルの抽出
