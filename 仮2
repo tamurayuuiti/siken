@@ -89,7 +89,7 @@ def extract_face_embeddings(image_path):
         print(f"Warning: EfficientNetV2 embedding failed for {image_path}")
         efficientnet_embedding = np.zeros(512)
 
-    return arcface_embedding, efficientnet_embedding.flatten(), img
+    return arcface_embedding, efficientnet_embedding.numpy().flatten(), img
 
 # ---------------------------------------------
 # データセットの処理（埋め込みベクトルの生成）
