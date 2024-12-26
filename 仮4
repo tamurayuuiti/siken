@@ -51,6 +51,12 @@ class_names = [class_indices[str(i)] for i in range(len(class_indices))]
 print(f"Loaded class names: {class_names}")
 
 # ---------------------------------------------
+# フレーム間引き設定
+# ---------------------------------------------
+# フレーム間引き設定: 処理するフレームの間隔を指定（例: 6フレームごとに1フレーム処理）
+FRAME_SKIP_INTERVAL = 6
+
+# ---------------------------------------------
 # 画像の前処理関数
 # ---------------------------------------------
 def extract_embeddings(image, face):
@@ -105,6 +111,11 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
         ret, frame = cap.read()
         if not ret:
             break
+
+        # フレーム間引き: 指定された間隔以外のフレームはスキップ
+        if frame_idx % FRAME_SKIP_INTERVAL != 0:
+            frame_idx += 1
+            continue
 
         # フレーム単位の処理
         faces = app.get(frame)
