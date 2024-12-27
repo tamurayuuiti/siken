@@ -112,43 +112,39 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
         if not ret:
             break
 
-        # フレーム間引き: 指定された間隔以外のフレームはスキップ
-        if frame_idx % FRAME_SKIP_INTERVAL != 0:
-            frame_idx += 1
-            continue
+        # フレーム間引き: 指定された間隔以外のフレームは顔認識処理をスキップ
+        if frame_idx % FRAME_SKIP_INTERVAL == 0:
+            faces = app.get(frame)  # 顔検出
+            if len(faces) > 0:
+                no_face_detected = False
 
-        # フレーム単位の処理
-        faces = app.get(frame)
-        if len(faces) > 0:
-            no_face_detected = False
+            for face_idx, face in enumerate(faces, start=1):
+                arcface_embedding, efficientnet_embedding = extract_embeddings(frame, face)
+                if arcface_embedding is None or efficientnet_embedding is None:
+                    continue
 
-        for face_idx, face in enumerate(faces, start=1):
-            arcface_embedding, efficientnet_embedding = extract_embeddings(frame, face)
-            if arcface_embedding is None or efficientnet_embedding is None:
-                continue
+                embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
+                predictions = model.predict(embeddings_input, verbose=0)
 
-            embeddings_input = [np.expand_dims(arcface_embedding, axis=0), np.expand_dims(efficientnet_embedding, axis=0)]
-            predictions = model.predict(embeddings_input, verbose=0)
+                predicted_class_index = np.argmax(predictions)
+                confidence = predictions[0][predicted_class_index] * 100
 
-            predicted_class_index = np.argmax(predictions)
-            confidence = predictions[0][predicted_class_index] * 100
+                if confidence < UNKNOWN_THRESHOLD:
+                    predicted_class = "unknown"
+                else:
+                    predicted_class = class_names[predicted_class_index]
 
-            if confidence < UNKNOWN_THRESHOLD:
-                predicted_class = "unknown"
-            else:
-                predicted_class = class_names[predicted_class_index]
+                x1, y1, x2, y2 = face.bbox.astype(int)
+                label = f"{predicted_class} ({confidence:.2f}%)"
+                color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
+                font_scale = max(frame_width, frame_height) / 1200
+                font_scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, font_scale))
+                thickness = max(1, int(font_scale * 2))
 
-            x1, y1, x2, y2 = face.bbox.astype(int)
-            label = f"{predicted_class} ({confidence:.2f}%)"
-            color = (0, 255, 0) if predicted_class != "unknown" else (0, 0, 255)
-            font_scale = max(frame_width, frame_height) / 1200
-            font_scale = max(MIN_FONT_SCALE, min(MAX_FONT_SCALE, font_scale))
-            thickness = max(1, int(font_scale * 2))
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
-            cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
-
-        out.write(frame)  # 結果フレームを保存
+        out.write(frame)  # 全フレームを結果動画に保存
 
         # フレームの削除
         del frame  # メモリ解放
