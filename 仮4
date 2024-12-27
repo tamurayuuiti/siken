@@ -51,10 +51,11 @@ class_names = [class_indices[str(i)] for i in range(len(class_indices))]
 print(f"Loaded class names: {class_names}")
 
 # ---------------------------------------------
-# フレーム間引き設定
+# フレーム処理設定
 # ---------------------------------------------
-# フレーム間引き設定: 処理するフレームの間隔を指定（例: 6フレームごとに1フレーム処理）
-FRAME_SKIP_INTERVAL = 6
+# 処理するフレーム数とスキップするフレーム数を指定
+PROCESS_FRAMES = 6
+SKIP_FRAMES = 6
 
 # ---------------------------------------------
 # 画像の前処理関数
@@ -107,13 +108,17 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
     frame_idx = 0
     start_time = time.time()  # 処理開始時間を記録
 
+    # 処理状態を切り替えるためのフラグ
+    process_mode = True  # True: 処理モード, False: スキップモード
+    process_counter = 0  # 現在の処理フレーム数またはスキップフレーム数
+
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
 
-        # フレーム間引き: 指定された間隔以外のフレームは顔認識処理をスキップ
-        if frame_idx % FRAME_SKIP_INTERVAL == 0:
+        # 処理モードで顔検出・認識を実行
+        if process_mode:
             faces = app.get(frame)  # 顔検出
             if len(faces) > 0:
                 no_face_detected = False
@@ -143,6 +148,15 @@ for video_name in os.listdir(TEST_VIDEOS_DIR):
 
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
                 cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
+
+        # 処理状態を管理
+        process_counter += 1
+        if process_mode and process_counter >= PROCESS_FRAMES:
+            process_mode = False
+            process_counter = 0
+        elif not process_mode and process_counter >= SKIP_FRAMES:
+            process_mode = True
+            process_counter = 0
 
         out.write(frame)  # 全フレームを結果動画に保存
 
