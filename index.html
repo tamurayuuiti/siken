@@ -48,6 +48,7 @@
     let stream = null;
     let isMicActive = true;
     let animationId = null;
+    let savedDataArray = null;  // 停止時の波形を保存
 
     function startAudio() {
       navigator.mediaDevices.getUserMedia({ audio: true })
@@ -76,7 +77,9 @@
         audioContext = null;
       }
       cancelAnimationFrame(animationId);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 現在の波形データを保存しておく
+      savedDataArray = savedDataArray || new Uint8Array(analyser.fftSize);
+      analyser.getByteTimeDomainData(savedDataArray);
     }
 
     function drawGrid() {
@@ -123,7 +126,12 @@
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       drawGrid();
 
-      analyser.getByteTimeDomainData(dataArray);
+      if (isMicActive) {
+        analyser.getByteTimeDomainData(dataArray);
+        savedDataArray = dataArray.slice(); // 現在の波形データを保存
+      } else if (savedDataArray) {
+        dataArray.set(savedDataArray); // 停止時のデータを使う
+      }
 
       ctx.lineWidth = 2;
       ctx.strokeStyle = waveColor;
@@ -146,7 +154,9 @@
       }
 
       ctx.stroke();
-      animationId = requestAnimationFrame(drawWave);
+      if (isMicActive) {
+        animationId = requestAnimationFrame(drawWave);
+      }
     }
 
     document.getElementById('toggleMic').addEventListener('click', () => {
@@ -156,6 +166,7 @@
       } else {
         startAudio();
         document.getElementById('toggleMic').textContent = 'マイク停止';
+        drawWave(); // 再開時に即時描画
       }
       isMicActive = !isMicActive;
     });
