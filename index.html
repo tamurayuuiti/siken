@@ -13,9 +13,24 @@
     canvas {
       display: block;
     }
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 10;
+    }
+    button {
+      font-size: 16px;
+      padding: 10px;
+      margin: 5px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
+  <div id="controls">
+    <button id="toggleMic">マイク停止</button>
+  </div>
   <canvas id="waveform"></canvas>
   <script>
     const canvas = document.getElementById('waveform');
@@ -23,118 +38,135 @@
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    const canvasWidth = canvas.width;
-    const canvasHeight = canvas.height;
-
     const waveColor = 'limegreen';
     const gridColor = 'gray';
     const memoryTextColor = 'white';
 
-    navigator.mediaDevices.getUserMedia({ audio: true })
-      .then(stream => {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const analyser = audioContext.createAnalyser();
+    let audioContext = null;
+    let analyser = null;
+    let source = null;
+    let stream = null;
+    let isMicActive = true;
+    let animationId = null;
 
-        const source = audioContext.createMediaStreamSource(stream);
-        source.connect(analyser);
+    function startAudio() {
+      navigator.mediaDevices.getUserMedia({ audio: true })
+        .then(userStream => {
+          stream = userStream;
+          audioContext = new (window.AudioContext || window.webkitAudioContext)();
+          analyser = audioContext.createAnalyser();
 
-        // 波形の詳細度を調整
-        analyser.fftSize = 1024; // 高速フーリエ変換のサイズ
-        const bufferLength = analyser.fftSize;
-        const dataArray = new Uint8Array(bufferLength);
+          source = audioContext.createMediaStreamSource(stream);
+          source.connect(analyser);
 
-        // スケール調整用の定数
-        const amplitudeMax = 10000;
+          analyser.fftSize = 1024;
+          drawWave();
+        })
+        .catch(error => {
+          console.error('マイクの取得に失敗しました:', error);
+        });
+    }
 
-        function drawGrid() {
-          const timeDivisions = 10; // 横軸の時間分割数
-          const amplitudeDivisions = 10; // 縦軸の振幅分割数
+    function stopAudio() {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+      if (audioContext) {
+        audioContext.close();
+        audioContext = null;
+      }
+      cancelAnimationFrame(animationId);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
 
-          ctx.strokeStyle = gridColor;
-          ctx.lineWidth = 0.5;
+    function drawGrid() {
+      ctx.strokeStyle = gridColor;
+      ctx.lineWidth = 0.5;
 
-          // 横軸の時間メモリ
-          for (let i = 0; i <= timeDivisions; i++) {
-            const x = (canvasWidth / timeDivisions) * i;
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvasHeight);
-            ctx.stroke();
+      const timeDivisions = 10;
+      const amplitudeDivisions = 10;
+      const amplitudeMax = 10000;
 
-            // メモリ値描画
-            ctx.fillStyle = memoryTextColor;
-            ctx.font = '12px Arial';
-            const timeLabel = `${(i * analyser.fftSize / audioContext.sampleRate).toFixed(2)}s`;
-            ctx.fillText(timeLabel, x + 2, canvasHeight - 10);
-          }
+      for (let i = 0; i <= timeDivisions; i++) {
+        const x = (canvas.width / timeDivisions) * i;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
 
-          // 縦軸の振幅メモリ
-          for (let i = 0; i <= amplitudeDivisions; i++) {
-            const y = (canvasHeight / amplitudeDivisions) * i;
-            ctx.beginPath();
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvasWidth, y);
-            ctx.stroke();
+        ctx.fillStyle = memoryTextColor;
+        ctx.font = '12px Arial';
+        ctx.fillText(`${(i * analyser.fftSize / (audioContext ? audioContext.sampleRate : 44100)).toFixed(2)}s`, x + 2, canvas.height - 10);
+      }
 
-            // メモリ値描画
-            ctx.fillStyle = memoryTextColor;
-            ctx.font = '12px Arial';
+      for (let i = 0; i <= amplitudeDivisions; i++) {
+        const y = (canvas.height / amplitudeDivisions) * i;
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
 
-            // -10000～10000の範囲を分割
-            const amplitudeValue = ((amplitudeDivisions - i) / amplitudeDivisions) * 2 * amplitudeMax - amplitudeMax;
-            ctx.fillText(`${Math.round(amplitudeValue)}`, 5, y - 2);
-          }
+        ctx.fillStyle = memoryTextColor;
+        ctx.font = '12px Arial';
+        const amplitudeValue = ((amplitudeDivisions - i) / amplitudeDivisions) * 2 * amplitudeMax - amplitudeMax;
+        ctx.fillText(`${Math.round(amplitudeValue)}`, 5, y - 2);
+      }
+    }
+
+    function drawWave() {
+      if (!analyser) return;
+
+      const bufferLength = analyser.fftSize;
+      const dataArray = new Uint8Array(bufferLength);
+
+      ctx.fillStyle = 'black';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      drawGrid();
+
+      analyser.getByteTimeDomainData(dataArray);
+
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = waveColor;
+      ctx.beginPath();
+
+      const sliceWidth = canvas.width / bufferLength;
+      let x = 0;
+
+      for (let i = 0; i < bufferLength; i++) {
+        const v = (dataArray[i] / 128.0 - 1.0) * 10000;
+        const y = canvas.height / 2 - (v / 10000) * (canvas.height / 2);
+
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
         }
 
-        function drawWave() {
-          analyser.getByteTimeDomainData(dataArray);
+        x += sliceWidth;
+      }
 
-          // キャンバスをクリア
-          ctx.fillStyle = 'black';
-          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      ctx.stroke();
+      animationId = requestAnimationFrame(drawWave);
+    }
 
-          // グリッドを描画
-          drawGrid();
+    document.getElementById('toggleMic').addEventListener('click', () => {
+      if (isMicActive) {
+        stopAudio();
+        document.getElementById('toggleMic').textContent = 'マイク再開';
+      } else {
+        startAudio();
+        document.getElementById('toggleMic').textContent = 'マイク停止';
+      }
+      isMicActive = !isMicActive;
+    });
 
-          // 波形を描画
-          ctx.lineWidth = 2;
-          ctx.strokeStyle = waveColor;
-          ctx.beginPath();
-
-          const sliceWidth = canvasWidth / bufferLength;
-          let x = 0;
-
-          for (let i = 0; i < bufferLength; i++) {
-            // データを-10000～10000にスケーリング
-            const v = (dataArray[i] / 128.0 - 1.0) * amplitudeMax;
-            const y = canvasHeight / 2 - (v / amplitudeMax) * (canvasHeight / 2);
-
-            if (i === 0) {
-              ctx.moveTo(x, y);
-            } else {
-              ctx.lineTo(x, y);
-            }
-
-            x += sliceWidth;
-          }
-
-          ctx.stroke();
-
-          // 次フレームの描画をリクエスト
-          requestAnimationFrame(drawWave);
-        }
-
-        drawWave();
-      })
-      .catch(error => {
-        console.error('マイクの取得に失敗しました:', error);
-      });
-
-    // ウィンドウサイズ変更時にキャンバスサイズを更新
     window.addEventListener('resize', () => {
       canvas.width = window.innerWidth;
       canvas.height = window.innerHeight;
+      if (isMicActive) drawWave();
     });
+
+    startAudio();
   </script>
 </body>
 </html>
