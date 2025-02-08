@@ -1,182 +1,140 @@
-import os
-import cv2
-import numpy as np
-import imagehash
-from PIL import Image
-from itertools import combinations
-import statistics
-import shutil
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>リアルタイム波形グラフ</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: black;
+    }
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="waveform"></canvas>
+  <script>
+    const canvas = document.getElementById('waveform');
+    const ctx = canvas.getContext('2d');
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
 
-def calculate_phash(image_path):
-    """
-    画像からPHashを計算する関数。
-    """
-    try:
-        img = Image.open(image_path)
-        return imagehash.phash(img)
-    except Exception as e:
-        print(f"Error processing {image_path}: {e}")
-        return None
+    const canvasWidth = canvas.width;
+    const canvasHeight = canvas.height;
 
-def compare_images_by_hash(image_paths):
-    """
-    画像のハッシュ値を計算し、画像間の類似度を判定する関数。
-    ハミング距離を使用して類似度を評価。
-    """
-    hash_dict = {}
-    for img_path in image_paths:
-        img_hash = calculate_phash(img_path)
-        if img_hash is not None:
-            hash_dict[img_path] = img_hash
-    return hash_dict
+    const waveColor = 'limegreen';
+    const gridColor = 'gray';
+    const memoryTextColor = 'white';
 
-def calculate_similarity(hash_dict):
-    """
-    ハッシュ値の差分（ハミング距離）を基に画像間の類似度を計算する関数。
-    """
-    similarity_results = []
-    for (img1, hash1), (img2, hash2) in combinations(hash_dict.items(), 2):
-        distance = hash1 - hash2  # ハミング距離
-        similarity_results.append((img1, img2, distance))
-    return similarity_results
+    navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(stream => {
+        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        const analyser = audioContext.createAnalyser();
 
-def save_similarity_logs(log_dir, class_name, similarity_results):
-    """
-    類似度の結果をログファイルに保存する関数。
-    """
-    os.makedirs(log_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, f"{class_name}_similarity_log.txt")
-    with open(log_file_path, "w") as log_file:
-        log_file.write("Image1\t\t\tImage2\t\t\tHamming Distance\n")
-        for img1, img2, distance in similarity_results:
-            log_file.write(f"{os.path.basename(img1)}\t{os.path.basename(img2)}\t{distance}\n")
+        const source = audioContext.createMediaStreamSource(stream);
+        source.connect(analyser);
 
-def calculate_statistics(similarity_results):
-    """
-    ハミング距離の統計指標を計算する関数。
-    """
-    distances = [distance for _, _, distance in similarity_results]
-    if distances:
-        mean = statistics.mean(distances)
-        std_dev = statistics.stdev(distances) if len(distances) > 1 else 0
-        min_value = min(distances)
-        max_value = max(distances)
-    else:
-        mean = std_dev = min_value = max_value = 0
-    return mean, std_dev, min_value, max_value
+        // 波形の詳細度を調整
+        analyser.fftSize = 1024; // 高速フーリエ変換のサイズ
+        const bufferLength = analyser.fftSize;
+        const dataArray = new Uint8Array(bufferLength);
 
-def find_similar_images(hash_dict, threshold=5):
-    """
-    画像間のハッシュ値を比較し、類似度が閾値以下の画像ペアを検出する関数。
-    """
-    similar_images = []
-    for (img1, hash1), (img2, hash2) in combinations(hash_dict.items(), 2):
-        distance = hash1 - hash2
-        if distance <= threshold:
-            similar_images.append((img1, img2, distance))
-    return similar_images
+        // スケール調整用の定数
+        const amplitudeMax = 10000;
 
-def remove_similar_images(log_file, similar_images, removed_image_dir, class_name):
-    """
-    重複画像を削除し、削除した情報をログに記録する関数。
-    削除した画像は指定ディレクトリに保存し、名前を変更する。
-    """
-    os.makedirs(removed_image_dir, exist_ok=True)
-    removed_images = set()
-    count = 1
+        function drawGrid() {
+          const timeDivisions = 10; // 横軸の時間分割数
+          const amplitudeDivisions = 10; // 縦軸の振幅分割数
 
-    for img1, img2, distance in similar_images:
-        if img2 not in removed_images:
-            try:
-                # 新しい名前を生成して画像を移動
-                new_name_1 = f"{class_name}_{str(count).zfill(3)}_1{os.path.splitext(img1)[1]}"
-                new_name_2 = f"{class_name}_{str(count).zfill(3)}_2{os.path.splitext(img2)[1]}"
-                shutil.copy(img1, os.path.join(removed_image_dir, new_name_1))
-                shutil.move(img2, os.path.join(removed_image_dir, new_name_2))
-                
-                # 削除した画像を記録
-                log_file.write(f"{class_name}\t{os.path.basename(img1)}\t{os.path.basename(img2)}\t{distance}\n")
-                print(f"Removed: {img2} -> Saved as {new_name_2} (similar to {img1})")
-                removed_images.add(img2)
-                count += 1
-            except Exception as e:
-                print(f"Error handling {img2}: {e}")
+          ctx.strokeStyle = gridColor;
+          ctx.lineWidth = 0.5;
 
-def process_data(processed_data_dir, log_dir, threshold=5):
-    """
-    processed_data内の各クラスの画像についてハッシュベースの類似度を計算し、ログに保存し、
-    類似画像を検出・削除する関数。
-    """
-    if not os.path.exists(processed_data_dir):
-        print(f"Error: '{processed_data_dir}' does not exist.")
-        return
+          // 横軸の時間メモリ
+          for (let i = 0; i <= timeDivisions; i++) {
+            const x = (canvasWidth / timeDivisions) * i;
+            ctx.beginPath();
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvasHeight);
+            ctx.stroke();
 
-    # ディレクトリ作成
-    similarity_log_dir = os.path.join(log_dir, "similarity_log")
-    removed_log_dir = os.path.join(log_dir, "removed_log")
-    removed_image_dir = os.path.join(removed_log_dir, "images")
-    removal_log_path = os.path.join(removed_log_dir, "removed_images_log.txt")
-    os.makedirs(similarity_log_dir, exist_ok=True)
-    os.makedirs(removed_log_dir, exist_ok=True)
+            // メモリ値描画
+            ctx.fillStyle = memoryTextColor;
+            ctx.font = '12px Arial';
+            const timeLabel = `${(i * analyser.fftSize / audioContext.sampleRate).toFixed(2)}s`;
+            ctx.fillText(timeLabel, x + 2, canvasHeight - 10);
+          }
 
-    summary_stats = []
+          // 縦軸の振幅メモリ
+          for (let i = 0; i <= amplitudeDivisions; i++) {
+            const y = (canvasHeight / amplitudeDivisions) * i;
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvasWidth, y);
+            ctx.stroke();
 
-    class_dirs = [d for d in os.listdir(processed_data_dir) if os.path.isdir(os.path.join(processed_data_dir, d))]
+            // メモリ値描画
+            ctx.fillStyle = memoryTextColor;
+            ctx.font = '12px Arial';
 
-    with open(removal_log_path, "w") as removal_log_file:
-        removal_log_file.write("Class Name\tImage1\t\t\tImage2\t\t\tHamming Distance\n")
+            // -10000～10000の範囲を分割
+            const amplitudeValue = ((amplitudeDivisions - i) / amplitudeDivisions) * 2 * amplitudeMax - amplitudeMax;
+            ctx.fillText(`${Math.round(amplitudeValue)}`, 5, y - 2);
+          }
+        }
 
-        for class_name in class_dirs:
-            class_path = os.path.join(processed_data_dir, class_name)
-            print(f"Processing class: {class_name}")
+        function drawWave() {
+          analyser.getByteTimeDomainData(dataArray);
 
-            # クラス内の画像パスを取得
-            image_paths = [os.path.join(class_path, img) for img in os.listdir(class_path)
-                           if img.lower().endswith(('jpg', 'jpeg', 'png'))]
+          // キャンバスをクリア
+          ctx.fillStyle = 'black';
+          ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
-            if len(image_paths) < 2:
-                print(f"Warning: Not enough images in class '{class_name}' for comparison.")
-                continue
+          // グリッドを描画
+          drawGrid();
 
-            # ハッシュ計算
-            hash_dict = compare_images_by_hash(image_paths)
+          // 波形を描画
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = waveColor;
+          ctx.beginPath();
 
-            # 類似度の結果を計算
-            similarity_results = calculate_similarity(hash_dict)
-            save_similarity_logs(similarity_log_dir, class_name, similarity_results)
+          const sliceWidth = canvasWidth / bufferLength;
+          let x = 0;
 
-            # 統計指標を計算
-            mean, std_dev, min_value, max_value = calculate_statistics(similarity_results)
-            summary_stats.append((class_name, mean, std_dev, min_value, max_value))
+          for (let i = 0; i < bufferLength; i++) {
+            // データを-10000～10000にスケーリング
+            const v = (dataArray[i] / 128.0 - 1.0) * amplitudeMax;
+            const y = canvasHeight / 2 - (v / amplitudeMax) * (canvasHeight / 2);
 
-            # 類似画像の検出と削除
-            similar_images = find_similar_images(hash_dict, threshold)
-            remove_similar_images(removal_log_file, similar_images, removed_image_dir, class_name)
+            if (i === 0) {
+              ctx.moveTo(x, y);
+            } else {
+              ctx.lineTo(x, y);
+            }
 
-            print(f"Finished processing class: {class_name}")
+            x += sliceWidth;
+          }
 
-    save_summary_statistics(summary_stats, similarity_log_dir)
-    print("Summary statistics and similarity logs saved.")
+          ctx.stroke();
 
-def save_summary_statistics(summary_stats, log_dir):
-    """
-    全クラスの統計情報をまとめて保存する関数。
-    """
-    summary_file_path = os.path.join(log_dir, "summary_statistics.txt")
-    with open(summary_file_path, "w") as summary_file:
-        summary_file.write("Class Name\tMean\t\tStandard Deviation\tMin\tMax\n")
-        for class_name, mean, std_dev, min_value, max_value in summary_stats:
-            summary_file.write(f"{class_name:<12}\t{mean:.2f}\t\t{std_dev:.2f}\t\t\t{min_value}\t{max_value}\n")
+          // 次フレームの描画をリクエスト
+          requestAnimationFrame(drawWave);
+        }
 
-if __name__ == "__main__":
-    # ディレクトリ設定
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    processed_data_dir = os.path.join(base_dir, "processed_data")
-    log_dir = os.path.join(base_dir, "logs")
+        drawWave();
+      })
+      .catch(error => {
+        console.error('マイクの取得に失敗しました:', error);
+      });
 
-    # 閾値設定
-    threshold = 5
-
-    # データ処理
-    process_data(processed_data_dir, log_dir, threshold)
-    print("Data processing completed. Logs and statistics are saved.")
+    // ウィンドウサイズ変更時にキャンバスサイズを更新
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    });
+  </script>
+</body>
+</html>
